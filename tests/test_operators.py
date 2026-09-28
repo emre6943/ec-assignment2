@@ -5,7 +5,8 @@ import numpy as np
 from network import NetworkShape, pack, unpack
 from operators import neuron_crossover, tournament_select
 
-SHAPE = NetworkShape(n_inputs=4, n_hidden=6, n_outputs=3)
+SHAPE = NetworkShape(n_inputs=4, hidden=(6,), n_outputs=3)
+DEEP = NetworkShape(n_inputs=4, hidden=(5, 6), n_outputs=3)
 
 
 def test_crossover_inherits_whole_neurons() -> None:
@@ -15,7 +16,7 @@ def test_crossover_inherits_whole_neurons() -> None:
     for seed in range(20):
         child = neuron_crossover(parent_a, parent_b, SHAPE, np.random.default_rng(seed))
         w1, w2 = unpack(child, SHAPE)
-        for j in range(SHAPE.n_hidden):
+        for j in range(SHAPE.hidden[0]):
             neuron_genes = np.concatenate([w1[:, j], w2[j, :]])
             assert np.all(neuron_genes == neuron_genes[0]), f"neuron {j} was split"
 
@@ -35,7 +36,7 @@ def test_crossover_keeps_neuron_identity_with_real_weights() -> None:
     a1, a2 = unpack(parent_a, SHAPE)
     b1, b2 = unpack(parent_b, SHAPE)
     c1, c2 = unpack(neuron_crossover(parent_a, parent_b, SHAPE, rng), SHAPE)
-    for j in range(SHAPE.n_hidden):
+    for j in range(SHAPE.hidden[0]):
         from_a = np.array_equal(c1[:, j], a1[:, j]) and np.array_equal(c2[j], a2[j])
         from_b = np.array_equal(c1[:, j], b1[:, j]) and np.array_equal(c2[j], b2[j])
         assert from_a or from_b
@@ -45,7 +46,20 @@ def test_crossover_of_identical_parents_is_a_copy() -> None:
     parent = np.random.default_rng(0).normal(size=SHAPE.n_weights)
     child = neuron_crossover(parent, parent.copy(), SHAPE, np.random.default_rng(1))
     np.testing.assert_array_equal(child, parent)
-    assert pack(*unpack(child, SHAPE)).shape == parent.shape
+    assert pack(unpack(child, SHAPE)).shape == parent.shape
+
+
+def test_crossover_keeps_incoming_weights_together_in_deep_networks() -> None:
+    """With two hidden layers every hidden neuron's incoming column is intact."""
+    parent_a = np.zeros(DEEP.n_weights)
+    parent_b = np.ones(DEEP.n_weights)
+    for seed in range(20):
+        child = neuron_crossover(parent_a, parent_b, DEEP, np.random.default_rng(seed))
+        w1, w2, w3 = unpack(child, DEEP)
+        for column in (*w1.T, *w2.T):
+            assert np.all(column == column[0])
+        for j in range(DEEP.hidden[-1]):  # last hidden layer: in and out together
+            assert np.all(np.append(w2[:, j], w3[j]) == w2[0, j])
 
 
 def test_tournament_of_everyone_returns_the_best() -> None:

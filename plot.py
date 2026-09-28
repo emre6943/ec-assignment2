@@ -58,7 +58,7 @@ def style_axis(axis: plt.Axes, ylabel: str) -> None:
 
 
 def plot_run(run: Path) -> Path:
-    """Draw the three panels for one run folder; return the image path."""
+    """Draw the four panels for one run folder; return the image path."""
     log = pd.read_csv(run / "log.csv", dtype={"island": str})
     config = json.loads((run / "config.json").read_text())["ea"]
     everyone = log[log["island"] == "all"]

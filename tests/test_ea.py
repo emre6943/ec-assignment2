@@ -1,4 +1,4 @@
-"""The plateau stopping rule, and a tiny end-to-end run of the island EA.
+"""A tiny end-to-end run of the island EA, and its settings and random streams.
 
 The end-to-end runs use ARIEL's `SimpleFlatWorld`: rugged terrain is random on
 every construction, so only a flat world makes two runs comparable exactly.
@@ -8,18 +8,20 @@ import csv
 import multiprocessing as mp
 import random
 from collections.abc import Iterator
+from dataclasses import replace
+from itertools import pairwise
 from multiprocessing.pool import Pool
 from pathlib import Path
 
 import numpy as np
 import pytest
-from ariel.ec import set_seed
+from ariel.ec import FloatMutator, set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 
-from ea import EAConfig, Experiment, plateaued
+from ea import EAConfig, Experiment, check_config, operator_rng
 from simulate import SimConfig
 
-TINY_SIM = SimConfig(duration=0.3, n_hidden=4)
+TINY_SIM = SimConfig(duration=0.3, hidden_layers="4")
 
 
 def tiny_config(policy: str, seed: int = 0) -> EAConfig:
@@ -50,19 +52,6 @@ def run_tiny(config: EAConfig, out: Path, pool: Pool) -> list[dict[str, str]]:
     Experiment(config, TINY_SIM, out, pool, world_factory=SimpleFlatWorld).evolve()
     with (out / "log.csv").open() as handle:
         return list(csv.DictReader(handle))
-
-
-def test_no_plateau_before_two_full_windows() -> None:
-    assert not plateaued([1.0] * 39, window=20, tolerance=0.01)
-
-
-def test_flat_history_is_a_plateau() -> None:
-    assert plateaued([1.0] * 40, window=20, tolerance=0.01)
-
-
-def test_steady_improvement_is_not_a_plateau() -> None:
-    history = list(np.linspace(2.0, 1.0, 40))
-    assert not plateaued(history, window=20, tolerance=0.01)
 
 
 def test_best_policy_moves_individuals_and_none_does_not(
@@ -103,7 +92,7 @@ def test_fixed_terrain_elites_are_not_re_evaluated(tmp_path: Path, pool: Pool) -
     evaluations = [int(r["evaluations"]) for r in rows if r["island"] == "all"]
     per_generation = config.n_islands * (config.island_size - config.n_elites)
     assert evaluations[0] == config.n_islands * config.island_size
-    assert all(b - a == per_generation for a, b in zip(evaluations, evaluations[1:]))
+    assert all(b - a == per_generation for a, b in pairwise(evaluations))
 
 
 def test_conditions_with_the_same_seed_share_the_terrain(
@@ -127,3 +116,51 @@ def test_conditions_with_the_same_seed_share_the_terrain(
     assert str(shared / "terrain0.mjb") in first
     assert str(shared / "terrain0.mjb") in second
     assert sorted(p.name for p in shared.iterdir()) == ["terrain0.mjb"]
+
+
+def test_operator_stream_is_independent_of_ariels_mutation_stream() -> None:
+    """Same run seed, but our operators and ARIEL's mutation draw different numbers."""
+    set_seed(0)
+    mutation_noise = np.asarray(
+        FloatMutator.gaussian([0.0] * 50, std=1.0, mutation_probability=1.0)
+    )
+    ours = operator_rng(0).normal(size=50)
+    assert abs(np.corrcoef(mutation_noise, ours)[0, 1]) < 0.5
+    np.testing.assert_array_equal(
+        operator_rng(0).normal(size=5), operator_rng(0).normal(size=5)
+    )
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("n_elites", 20),
+        ("tournament_size", 0),
+        ("n_migrants", 21),
+        ("curriculum_generations", 0),
+        ("migration_interval", 0),
+    ],
+)
+def test_impossible_settings_are_rejected(setting: str, value: int) -> None:
+    with pytest.raises(ValueError, match=setting):
+        check_config(replace(EAConfig(), **{setting: value}))
+
+
+def test_log_has_best_final_and_best_is_monotone(tmp_path: Path, pool: Pool) -> None:
+    """Without a curriculum, best_final equals best, and the best never gets worse."""
+    rows = run_tiny(tiny_config("random"), tmp_path / "run", pool)
+    everyone = [r for r in rows if r["island"] == "all"]
+    assert all(float(r["best_final"]) == float(r["best"]) for r in everyone)
+    best = [float(r["best_final"]) for r in everyone]
+    assert all(later <= earlier + 1e-12 for earlier, later in pairwise(best))
+
+
+def test_a_rerun_removes_the_previous_runs_outputs(tmp_path: Path, pool: Pool) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    (out / "unseen.json").write_text("{}")  # left over from an earlier run
+    Experiment(
+        tiny_config("none"), TINY_SIM, out, pool, world_factory=SimpleFlatWorld
+    ).evolve()
+    assert not (out / "unseen.json").exists()
+    assert (out / "summary.json").exists()

@@ -4,7 +4,7 @@ How one generation works (the operations run in this order):
 
     reproduce   per island: keep the elites, fill the rest with children
                 (tournament -> neuron crossover -> Gaussian mutation)
-    evaluate    everyone new walks the generation's terrains, in parallel
+    evaluate    everyone new walks the run's terrain(s), in parallel
     migrate     every `migration_interval` generations, each island sends
                 copies of `n_migrants` individuals to the next island in the
                 ring, chosen by the migration POLICY (the research question)
@@ -74,6 +74,7 @@ LOG_COLUMNS: tuple[str, ...] = (
     "best",
     "mean",
     "worst",
+    "best_final",
     "best_distance",
     "ground_contact",
     "upside_down",
@@ -102,7 +103,7 @@ class EAConfig:
     n_elites: int = 2
     tournament_size: int = 3
     crossover_probability: float = 0.5
-    mutation_sigma: float = 0.1
+    mutation_sigma: float = 0.05  # chosen by the pilot (D8)
     mutation_rate: float = 1.0
     init_scale: float = 0.5
 
@@ -123,24 +124,38 @@ class EAConfig:
     early_stop_progress_end: float = 0.10
     curriculum_generations: int = 50
 
-    # Budget and stopping (decision D12)
-    max_evaluations: int = 3000
-    plateau_window: int = 20
-    plateau_tolerance: float = 0.01
+    # Budget (decision D12): a run stops after this many evaluations.
+    max_evaluations: int = 12000
 
 
-def plateaued(best_per_generation: list[float], window: int, tolerance: float) -> bool:
-    """True when the last `window` generations did not beat the `window` before.
+def check_config(config: "EAConfig") -> None:
+    """Reject settings that would fail later with a confusing error."""
+    problems = []
+    if config.n_elites >= config.island_size:
+        problems.append("n_elites must be smaller than island_size")
+    if not 1 <= config.tournament_size <= config.island_size:
+        problems.append("tournament_size must be between 1 and island_size")
+    if config.n_migrants > config.island_size:
+        problems.append("n_migrants cannot exceed island_size")
+    if config.curriculum_generations < 1:
+        problems.append("curriculum_generations must be at least 1")
+    if config.migration_interval < 1:
+        problems.append("migration_interval must be at least 1")
+    if problems:
+        raise ValueError("; ".join(problems))
 
-    Compares the MEAN best fitness of two consecutive windows rather than two
-    single generations, because each generation walks different terrain and a
-    single generation's best is noisy.
+
+def operator_rng(seed: int) -> np.random.Generator:
+    """The random stream for our own operators (initialisation, selection,
+    crossover, migration).
+
+    ARIEL's mutation draws from its own generator, which `ariel.ec.set_seed`
+    seeds with the plain run seed. Seeding ours with the same number would
+    make both produce the SAME numbers: the first mutation noise would be an
+    exact scaled copy of the first initial network. Deriving ours from
+    (seed, 1) keeps the two streams independent and still reproducible.
     """
-    if len(best_per_generation) < 2 * window:
-        return False
-    recent = np.mean(best_per_generation[-window:])
-    before = np.mean(best_per_generation[-2 * window : -window])
-    return bool(recent > before - tolerance)
+    return np.random.default_rng((seed, 1))
 
 
 def new_individual(
@@ -177,6 +192,7 @@ class Experiment:
         """`terrain_dir` holds this seed's terrains in "per_run" mode; pass the
         same directory to every condition with the same seed so they share
         the ground. It defaults to a folder inside `out`."""
+        check_config(config)
         self.config = config
         self.sim = sim
         self.out = out
@@ -192,14 +208,18 @@ class Experiment:
             self.terrain_paths = run_terrains(
                 self.terrain_dir, config.n_terrains, world_factory
             )
-        self.rng = np.random.default_rng(config.seed)
+        self.rng = operator_rng(config.seed)
 
         self.generation = 0
         self.evaluations = 0
-        self.best_per_generation: list[float] = []
         self.best_genotype: list[float] = []
         self.best_fitness = float("inf")
         self.started_at = time.time()
+
+        # Outputs of an earlier run in the same folder would otherwise survive
+        # and be read as this run's (e.g. by analyze.py).
+        for stale in ("summary.json", "unseen.json", "best_genotype.npy"):
+            (out / stale).unlink(missing_ok=True)
 
         self.log_path = out / "log.csv"
         with self.log_path.open("w", newline="") as handle:
@@ -259,9 +279,11 @@ class Experiment:
 
         The island's `n_elites` best are copied into the next generation
         unchanged; the rest of the next generation are children. On a fixed
-        terrain an elite keeps its fitness (the simulation is deterministic);
-        when the terrain changes every generation it is re-evaluated, because
-        its old fitness came from different ground (D10).
+        terrain an elite keeps its measurements (the simulation is
+        deterministic). It is re-evaluated when the terrain changes every
+        generation - its old measurements came from different ground (D10) -
+        and while the early-stop bar is still rising, because a walk measured
+        under a more lenient bar is not comparable (D16).
         """
         self.generation += 1
         next_generation = []
@@ -270,7 +292,7 @@ class Experiment:
             fitness = np.array([member.fitness for member in members])
             for rank, index in enumerate(np.argsort(fitness)[: self.config.n_elites]):
                 elite = members[index]
-                if self.fixed_terrain:
+                if self.fixed_terrain and not self.early_stop_bar_changing():
                     copy = new_individual(
                         elite.genotype,
                         island,
@@ -311,10 +333,9 @@ class Experiment:
         end = self.config.early_stop_progress_end
         return start + (end - start) * self.schedule()
 
-    def curriculum_active(self) -> bool:
-        """True while either schedule is still changing."""
-        uses_schedule = self.config.curriculum or self.config.early_stop
-        return uses_schedule and self.schedule() < 1.0
+    def early_stop_bar_changing(self) -> bool:
+        """True while the early-stop bar is still rising."""
+        return self.config.early_stop and self.schedule() < 1.0
 
     # -- Operations, continued ------------------------------------------- #
 
@@ -424,10 +445,11 @@ class Experiment:
             [compute_fitness(self.stored_score(m), self.sim) for m in everyone]
         )
         best = int(np.argmin(fitness))
-        self.best_per_generation.append(float(fitness[best]))
         if fitness[best] < self.best_fitness:
             self.best_fitness = float(fitness[best])
             self.best_genotype = list(everyone[best].genotype)
+            # Saved on every improvement, so a stopped run keeps its best.
+            np.save(self.out / "best_genotype.npy", np.asarray(self.best_genotype))
 
         champion = everyone[best].tags
         console.print(
@@ -443,6 +465,9 @@ class Experiment:
     def stats_row(self, island: str, members: list[Individual]) -> list[object]:
         """Fitness statistics and genotype spread for a group of individuals.
 
+        `best`, `mean` and `worst` use this generation's fitness (which in a
+        curriculum run still includes the movement reward); `best_final` is
+        the best FINAL fitness (no movement reward), comparable across runs.
         `best_distance` is the shortest distance to the target in the group;
         `ground_contact` and `upside_down` are the group's MEAN fractions of
         the run spent with the core on the ground and upside down.
@@ -452,6 +477,7 @@ class Experiment:
         spreads over time shows how quickly migration makes them alike.
         """
         fitness = np.array([member.fitness for member in members])
+        final = [compute_fitness(self.stored_score(m), self.sim) for m in members]
         parts = {
             part: np.array([member.tags[part] for member in members])
             for part in SCORE_PARTS
@@ -468,6 +494,7 @@ class Experiment:
             f"{fitness.min():.4f}",
             f"{fitness.mean():.4f}",
             f"{fitness.max():.4f}",
+            f"{min(final):.4f}",
             f"{parts['distance'].min():.4f}",
             f"{parts['ground_contact'].mean():.4f}",
             f"{parts['upside_down'].mean():.4f}",
@@ -480,12 +507,11 @@ class Experiment:
     # -- Running ------------------------------------------------------------ #
 
     def evolve(self) -> None:
-        """Evaluate generation 0, then step until the budget or a plateau."""
+        """Evaluate generation 0, then step until the evaluation budget is spent."""
         population = self.evaluate(self.initial_population())
         self.log(population)
 
         database = self.out / "database.db"
-        database.unlink(missing_ok=True)
         ea = EA(
             population,
             operations=[
@@ -496,33 +522,18 @@ class Experiment:
             ],
             is_maximisation=False,
             db_file_path=database,
-            db_handling="halt",
             quiet=True,
         )
 
-        config = self.config
-        while self.evaluations < config.max_evaluations:
+        while self.evaluations < self.config.max_evaluations:
             ea.step()
-            if not self.curriculum_active() and plateaued(
-                self.best_per_generation,
-                config.plateau_window,
-                config.plateau_tolerance,
-            ):
-                console.print(f"plateau reached at generation {self.generation}")
-                break
 
-        np.save(self.out / "best_genotype.npy", np.asarray(self.best_genotype))
         (self.out / "summary.json").write_text(
             json.dumps(
                 {
                     "generations": self.generation,
                     "evaluations": self.evaluations,
                     "best_fitness_seen": self.best_fitness,
-                    "stopped_by": (
-                        "budget"
-                        if self.evaluations >= config.max_evaluations
-                        else "plateau"
-                    ),
                     "seconds": round(time.time() - self.started_at, 1),
                 },
                 indent=2,

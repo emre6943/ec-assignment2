@@ -1,5 +1,7 @@
 """The fitness: distance to the target plus the two posture penalties (D15)."""
 
+from pathlib import Path
+
 import mujoco as mj
 import numpy as np
 import pytest
@@ -12,6 +14,7 @@ from simulate import (
     core_touches_ground,
     fitness,
     is_upside_down,
+    run_terrains,
     walk,
 )
 
@@ -82,3 +85,12 @@ def test_upside_down_is_detected(flat_model: mj.MjModel) -> None:
     data.qpos[3:7] = [np.cos(np.pi / 6), np.sin(np.pi / 6), 0.0, 0.0]  # 60° tilt
     mj.mj_forward(flat_model, data)
     assert not is_upside_down(data, core_id)
+
+
+def test_run_terrains_reuses_existing_files(tmp_path: Path) -> None:
+    first = run_terrains(tmp_path, 1, SimpleFlatWorld)
+    stamp = (tmp_path / "terrain0.mjb").stat().st_mtime_ns
+    second = run_terrains(tmp_path, 1, SimpleFlatWorld)
+    assert first == second
+    assert (tmp_path / "terrain0.mjb").stat().st_mtime_ns == stamp
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["terrain0.mjb"]

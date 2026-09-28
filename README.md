@@ -3,158 +3,211 @@
 Brain evolution (neuroevolution) for X_400111 at the VU. Team of 4, worth 10 points.
 **Deadline Tuesday 13 October 2026, 09:00 CEST.** Each day late costs 0,5 points.
 
-Assignment 1 evolved a body. This one takes a fixed body and evolves its controller.
+Assignment 1 evolved a body. This one takes a fixed body (`spider_16`) and evolves the
+weights of its neural-network controller, so that it walks towards a target on rugged
+terrain. Our research question compares **island-model migration policies**.
 
-## The task
+**New here? Read in this order:**
 
-Build an EA on top of `ariel.ec` that evolves the **weights of a neural-network
-controller** so a fixed body from the 'John Set' walks from its spawn position to a
-fixed target position.
+1. This README: setup, how to run things, where everything is.
+2. [`docs/decisions.md`](docs/decisions.md): every design choice, the alternatives and why
+   we chose what we did. This is the raw material for the report's Methods section.
+3. [`experiments/README.md`](experiments/README.md): every experiment we ran, what we
+   learned, and the script to reproduce it.
 
-Fitness is the Euclidean distance in the flat ground plane between the core body's
-final position and the target. Lower is better. On top of that we have to
-investigate **one aspect of the EA** - mutation, crossover, parent selection,
-survivor selection, population size or genotype representation - as an explicit
-research question, the same shape as Assignment 1.
+## Quick start
 
-Fixed choices, each fixed for the whole assignment:
-
-- **Body**: free choice from `ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set`.
-  Available: `baby_a`, `baby_b`, `gecko`, `linkin_modified`, `snake`, `turtle`,
-  `iguana`, `spider_8`, `spider_12`, `spider_16`, `centipede_3`, `centipede_4`,
-  `centipede_5`.
-- **World**: free choice from `ariel.simulation.environments`, **except
-  `SimpleTiltedWorld`**, which is not supported - John Set bodies slide off the
-  platform under a neutral gait. `SimpleFlatWorld`, `RuggedTerrainWorld`,
-  `CraterTerrainWorld`, `AmphitheatreTerrainWorld` and `OlympicArena` are all valid.
-- **Controller**: a neural network whose weights we evolve. **CPG-based controllers
-  are not supported for this task.**
-
-`ariel.simulation.tasks.targeted_locomotion` holds ready-made fitness variants if we
-want to build on one: plain remaining distance, distance reduced from the starting
-position, distance plus a control-effort penalty, one that penalises falling over,
-one that penalises a wandering path, and one that rewards reaching the target
-quickly. We may argue for our own metric as long as we define it clearly.
-
-## Experimental requirements
-
-- At least **5 independent runs** of the final experiments, reported as mean and
-  spread.
-- A **baseline** at the same evaluation budget - random search, or a fixed
-  non-evolved controller.
-- A line plot across generations showing avg/std of fitness over the independent
-  runs.
-- Stopping criterion should be the fitness curve plateauing, not a fixed generation
-  count.
-- Seed parametrised (CLI argument or env var) so the >=5-seed repeat is one script
-  invocation per configuration.
-
-## Hard rules
-
-- **No changes to anything in `ariel/src/ariel`.** The course calls that fraud and
-  it fails the assignment.
-- `ariel.ec` utilities are allowed as building blocks, but the search itself must be
-  our own design and implementation. **No off-the-shelf black-box optimizers**
-  (nevergrad, CMA-ES libraries).
-
-## Hand-in
-
-A single `groupnumber.zip` containing a folder of the same name, with the report as
-`groupnumber.pdf` and the code. Report: max 6 pages excluding cover page and
-bibliography, **GECCO19 template**. Sections: Introduction (with a clear research
-question), Methods, Results and discussion, Conclusions, Literature list. Cover page
-carries the course name, the task number and name, the team number/name, all members'
-names and student IDs, and the date.
-
-Grading is on the report; the code is checked for correctness and coherence with the
-report, but pure performance is not graded. Assignment 1 and Assignment 2 are 50%
-each of the practical grade.
-
-## Files
-
-    A2_template_2026.py    course template: spawns a robot, drives it with a
-                           RANDOM-weight network, reports the distance to target.
-                           There is deliberately no evolution in it.
-    Assignment2.pdf        the spec, as published on Canvas 2026-09-21
-
-The template comes from the ARIEL fork at
-github.com/AndrzejSzczepura/EvolutionaryComputing2026. Our own work goes in new files
-alongside it. The only edit made to it so far is line 71, `MODE = "simple"` instead of
-`"launcher"`, so it runs headless instead of opening a viewer window.
-
-⚠️ The template's `build_robot()` imports `gecko` from
-`ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko`, **not** from `john_set`.
-The spec requires a John Set body, so that import has to change before any real run -
-`john_set` has its own `gecko()`, among twelve others.
-
-## Setup
-
-Same as Assignment 1. This repo holds only our own code and has no environment of its
-own - every command runs against the ARIEL clone, which must sit **next to** this
-directory and must be named `ariel`:
+**1. Setup.** This repo has no Python environment of its own. Every command runs against
+the course's ARIEL fork, which must sit **next to** this folder and be named `ariel`:
 
     EvolutionaryComputing/
-    ├── ariel/         # the course fork, cloned as "ariel"
+    ├── ariel/         # git clone https://github.com/AndrzejSzczepura/EvolutionaryComputing2026 ariel
     └── assignment2/   # this repo
 
-Then, from inside this directory:
+Then run everything from inside `assignment2/` as `uv run --project ../ariel python ...`.
 
-    uv run --project ../ariel python A2_template_2026.py
+**2. Check it works** (about 30 seconds):
 
-## Code
+    uv run --project ../ariel python -m pytest tests -q
 
-Every design choice, with its alternatives and rationale, is in
-[`docs/decisions.md`](docs/decisions.md). Read that first.
-
-| File | What it holds |
-|---|---|
-| `network.py` | The controller network and how a flat genotype maps onto its weights |
-| `sensors.py` | The 34 network inputs: hinge angles, clock, target direction, tilt, 10 vision rays |
-| `terrain.py` | A spawn height that clears the rugged ground (the template's spawn buries the robot) |
-| `simulate.py` | One fitness evaluation: build the world, walk, measure the distance |
-| `operators.py` | Neuron-level crossover and tournament selection |
-| `migration.py` | Emigrant selection (best / worst / random / none) and the ring migration |
-| `ea.py` | The island-model EA as `ariel.ec` operations |
-| `run.py` | Command line: one condition, one or more seeds |
-| `plot.py` | Fitness and diversity curves of one run (`run.png` in the run folder) |
-| `replay.py` | Watch a run's best network walk: video, or a live viewer window |
-| `compare.py` | Overlay several runs on the plain distance, by evaluations and by wall-clock time |
-| `tests/` | Unit tests for all of the above, plus a tiny end-to-end run |
-
-Run one condition for several seeds (each 3,000-evaluation run takes ~4.5 min on 10 cores):
-
-    uv run --project ../ariel python run.py --policy best --seeds 0 1 2 3 4
-    uv run --project ../ariel python run.py --algorithm random_search --seeds 0 1 2 3 4
-
-Then look at what happened:
-
-    uv run --project ../ariel python plot.py results/best/seed0     # -> results/best/seed0/run.png
-    uv run --project ../ariel python replay.py results/best/seed0   # -> a video in the same folder
-    uv run --project ../ariel python replay.py results/best/seed0 --viewer   # live window
-
-Every setting is a flag (`python run.py --help`). `--world flat` runs on ARIEL's flat
-world; it is for debugging only, since the experiment world is rugged. `--curriculum`,
-`--early-stop` and `--stop-at-target` switch on the options of decision D16. A 10-second smoke test:
+**3. A tiny evolution run** (about 15 seconds; small population, short walks):
 
     uv run --project ../ariel python run.py --policy best --seeds 0 \
         --max-evaluations 150 --island-size 6 --n-elites 1 --n-migrants 1 \
-        --migration-interval 2 --n-terrains 1 --duration 3 --out results/smoke
+        --migration-interval 2 --duration 3 --out results/smoke
 
-Tests:
+**4. Look at it:**
 
-    uv run --project ../ariel python -m pytest tests
+    uv run --project ../ariel python plot.py results/smoke/seed0     # -> results/smoke/seed0/run.png
+    uv run --project ../ariel python replay.py results/smoke/seed0   # -> a video in that folder
+    uv run --project ../ariel python replay.py results/smoke/seed0 --viewer   # live 3D window
 
-## Measured baseline
+## What the code does
 
-A single evaluation with random weights, gecko body, `SimpleFlatWorld`,
-`SIM_DURATION = 15.0`, headless:
+**The robot:** `spider_16` from ARIEL's John Set, 4 legs × 4 hinges = 16 motors. It spawns
+on ARIEL's `RuggedTerrainWorld` and has 10 seconds to walk towards a target 2 m away.
 
-    controller inputs (len(data.qpos)) : 15
-    controller outputs (model.nu)      : 8
-    genotype length (total weights)    : 138
-    fitness                            : 1.9911   (target is 2.0 away, so it moved ~1cm)
+**The brain:** a feed-forward neural network.
 
-Wall clock was ~1.5s for the whole invocation including imports and two model
-compiles, so one headless evaluation is well under a second on this machine. That
-still means a 50x100 run is a few thousand evaluations - budget the full experiment
-grid before committing to it, as the spec's tips warn.
+- **34 inputs:**
+  - 16 joint angles;
+  - a clock (sin/cos at 1 Hz);
+  - where the target is relative to the robot's heading (3 values);
+  - how the body is tilted (3 values);
+  - 10 "vision" rays that measure the distance to the ground around it.
+- **One hidden layer of 16 neurons.**
+- **16 outputs:** one target angle per hinge.
+- The genotype is simply all 832 weights in one list.
+
+**The fitness** (lower is better):
+
+    distance to the target at the end
+      + 0.5 × share of the walk with the body on the ground
+      + 1.0 × share of the walk upside down
+
+Standing still scores 2.0.
+
+**The EA:** 4 islands of 20 networks each, in a ring. Every generation, on each island:
+
+1. The 2 best networks survive as they are (elitism).
+2. The rest are children: two parents are picked by tournament (size 3). Half of the time
+   they are combined by neuron-level crossover, which copies each hidden neuron whole from
+   one parent. The child is then mutated: every weight gets Gaussian noise, σ = 0.05.
+3. Every 10 generations, each island copies 2 individuals to the next island, where they
+   replace its 2 worst. **Which 2 are sent is the research question:** the `best`, the
+   `worst`, `random` ones, or `none` (no migration, the control).
+
+`random_search` is the baseline: the same loop, but children are random networks.
+
+**The terrain:** each seed gets one random rugged terrain, generated on its first use and
+saved in `results/terrains/rugged/seed<S>/`. Every condition with that seed walks exactly
+the same ground, which makes the comparison between policies fair.
+
+## Code map
+
+| File | What it holds |
+|---|---|
+| `run.py` | **Start here.** Command line: one condition, one or more seeds |
+| `ea.py` | The island-model EA as `ariel.ec` operations: reproduce, evaluate, migrate, log |
+| `migration.py` | Emigrant selection (best / worst / random / none) and the ring migration |
+| `operators.py` | Neuron-level crossover and tournament selection (mutation is ARIEL's own) |
+| `network.py` | The neural network, and how a flat genotype maps onto its weights |
+| `sensors.py` | The 34 network inputs, including the 10 vision rays |
+| `simulate.py` | One evaluation: walk the terrain, measure, compute the fitness |
+| `terrain.py` | A spawn height that clears the rugged ground (the template's spawn buries the robot) |
+| `plot.py` | Curves of one run: fitness, per-island best, posture, genetic diversity |
+| `replay.py` | Watch a run's best network walk, as a video or in a live viewer |
+| `compare.py` | Overlay a few runs on the plain distance, by evaluations and by wall-clock time |
+| `unseen.py` | Test each run's best network on 20 terrains it never saw (robustness) |
+| `analyze.py` | **The report's numbers:** mean ± std curves per condition, summary table, statistical tests |
+| `experiments/` | One script per experiment we ran, plus the log of what each one showed |
+| `docs/decisions.md` | Every design decision, with its reasoning |
+| `tests/` | Unit tests for all of the above, plus tiny end-to-end runs |
+| `A2_template_2026.py` | The course template, **unchanged** (except line 71: headless mode). Not used by our code |
+| `Assignment2.pdf` | The spec |
+
+## Running experiments
+
+    uv run --project ../ariel python run.py --policy best --seeds 0 1 2 3 4
+    uv run --project ../ariel python run.py --algorithm random_search --seeds 0 1 2 3 4
+    uv run --project ../ariel python run.py --help      # every setting is a flag
+
+- **Output:** each run writes to `results/<condition>/seed<S>/`:
+  - `config.json`: every setting of the run;
+  - `log.csv`: per generation, per island and overall;
+  - `database.db`: ARIEL's record of every individual;
+  - `best_genotype.npy`: the best network, saved whenever it improves;
+  - `summary.json`.
+- **Cost:** a default run (12,000 evaluations) takes about 17 minutes on a 10-core Mac.
+  `run.py` uses 10 worker processes; on a smaller machine pass `--workers 4` (or your
+  core count). Run experiments **one after another**: two at once just makes each slower.
+- **The full experiment** for the report is `experiments/08_main_experiment.sh`: 5
+  conditions × 5 seeds, about 7 hours, so run it overnight.
+- **Terrain files are per machine.** `results/` is not in git, so the same seed gives a
+  *different* terrain on your laptop than on someone else's. For the final results, one
+  person runs everything on one machine, or shares their `results/terrains/` folder.
+- **Options we tried and rejected** stay available for experimenting:
+  - `--curriculum`, `--early-stop` and `--stop-at-target` (decision D16);
+  - `--terrain-mode per_generation` (D10);
+  - `--world flat`, a debug world only.
+
+  See `experiments/README.md` for what they did.
+
+## Looking at results
+
+    uv run --project ../ariel python plot.py results/best/seed0                  # one run's curves
+    uv run --project ../ariel python replay.py results/best/seed0                # its best walk (video)
+    uv run --project ../ariel python replay.py results/best/seed0 --new-terrain  # ...on unseen ground
+    uv run --project ../ariel python compare.py results/best/seed0 results/none/seed0
+    uv run --project ../ariel python unseen.py results/best/seed*                # robustness test
+    uv run --project ../ariel python analyze.py results/best results/worst results/random \
+        results/none results/random_search                                       # report figure + stats
+
+`analyze.py` writes `results/analysis/`:
+
+- `convergence.png`: mean ± std across seeds, the plot the spec asks for;
+- `summary.csv` / `summary.md`: per run and per condition, the best fitness at the
+  budget, evaluations to reach a threshold, the area under the curve and (after
+  `unseen.py`) the distance on unseen terrain;
+- `stats.md`: a Friedman test across all conditions (blocked by seed), and Mann-Whitney
+  U tests of each condition against `none`, Holm-corrected (decision D3 explains why).
+
+## Rules we follow
+
+- **Never change, re-implement or reconfigure ARIEL** (`../ariel/src/ariel`). The course
+  treats changing it as fraud. We use its classes as shipped, with default settings. The
+  one exception is a spawn argument; see decision D2a.
+- **Never edit `A2_template_2026.py`.** Our code lives in new files.
+- **No black-box optimisers** (nevergrad, CMA-ES libraries). Selection, crossover and
+  migration are our own code; mutation and the population/database machinery come from
+  `ariel.ec`, which the course allows.
+- **Every design decision gets written down** in `docs/decisions.md`, with its reasoning;
+  every experiment goes in `experiments/`.
+- **Before committing:** the tests pass (`uv run --project ../ariel python -m pytest tests -q`)
+  and formatting is clean (`uvx black --check --force-exclude A2_template_2026.py .`).
+  Don't commit `results/`; it is gitignored.
+
+## The assignment in short
+
+**Task:** build an EA on top of `ariel.ec` that evolves the weights of a neural-network
+controller, so that a fixed John Set body walks from its spawn point to a fixed target.
+Investigate **one aspect of the EA** as a research question.
+
+**Fixed for the whole assignment:**
+
+- **Body:** a free choice from `ariel...prebuilt_robots.john_set`. We chose `spider_16`.
+- **World:** a free choice from `ariel.simulation.environments`, except
+  `SimpleTiltedWorld`. We chose `RuggedTerrainWorld`.
+- **Controller:** a neural network whose weights are evolved. **No CPGs.**
+
+**The spec's fitness** is the flat-ground distance from the core to the target, lower is
+better. We may argue for our own metric if we define it clearly; ours adds two posture
+terms (D15).
+
+**Experimental requirements:**
+
+- at least **5 independent runs** per configuration, reported as mean and spread;
+- a **baseline** at the same evaluation budget (ours: random search);
+- a line plot of mean/std fitness across runs;
+- a seed that can be set on the command line.
+
+The spec's tips also suggest stopping on a plateau; we explain our fixed budget in D12.
+
+**Hard rules:**
+
+- no changes to `ariel/src/ariel`;
+- the search must be our own design;
+- no off-the-shelf optimisers.
+
+**Hand-in:**
+
+- One `groupnumber.zip` containing a folder of the same name, with the report
+  (`groupnumber.pdf`) and the code.
+- The report: max 6 pages in the **GECCO19 template**, not counting the cover page and
+  bibliography.
+  - Sections: Introduction (with a clear research question), Methods, Results and
+    discussion, Conclusions, Literature.
+  - The cover page names the course, the task number and name, the team, every member's
+    name and student ID, and the date.
+- Grading is on the report; the code is checked for correctness and coherence with it.
+  Assignment 1 and Assignment 2 each count for 50% of the practical grade.

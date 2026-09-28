@@ -8,13 +8,14 @@ Each run writes to results/<condition>/seed<S>/:
     config.json        every setting of the run
     log.csv            per generation: fitness statistics per island and overall
     database.db        ariel.ec's record of every individual that ever lived
-    best_genotype.npy  the best network seen during the run
-    summary.json       generations, evaluations, why it stopped, wall time
+    best_genotype.npy  the best network so far (saved on every improvement)
+    summary.json       generations, evaluations, best fitness, wall time
 
 For a quick smoke test, shrink everything:
 
     uv run --project ../ariel python run.py --policy best --seeds 0 \\
-        --max-evaluations 200 --island-size 6 --duration 3 --out results/smoke
+        --max-evaluations 150 --island-size 6 --n-elites 1 --n-migrants 1 \\
+        --migration-interval 2 --duration 3 --out results/smoke
 """
 
 # Standard library

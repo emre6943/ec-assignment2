@@ -6,3 +6,4 @@ __pycache__/
 *.sqlite
 .claude/
 results/
+.DS_Store

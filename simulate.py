@@ -5,11 +5,12 @@
             + 1.0 x fraction of the run the robot is upside down      (stay upright)
             [ - a fading reward for moving at all, in curriculum runs (D16) ]
 
-averaged over the generation's terrains. LOWER IS BETTER. `walk` only measures
-(`Score`); `fitness` turns the measurements into the number the EA minimises. The distance term is
-ARIEL's own `distance_to_target`; the two posture terms are ours (decision
-D15). A spider carries its body on its legs: at rest spider_16's core lies on
-the ground, so it has to push itself up to avoid the ground penalty.
+averaged over the terrains the run walks. LOWER IS BETTER. `walk` only measures
+(`Score`); `fitness` turns the measurements into the number the EA minimises.
+The distance term is ARIEL's own `distance_to_target`; the two posture terms
+are ours (decision D15). A spider carries its body on its legs: at rest
+spider_16's core lies on the ground, so it has to push itself up to avoid
+the ground penalty.
 
 The pieces:
 
@@ -43,7 +44,7 @@ from ariel.simulation.environments import BaseWorld, RuggedTerrainWorld
 from ariel.simulation.tasks.targeted_locomotion import distance_to_target
 
 # Local libraries
-from network import Genotype, NetworkShape, forward
+from network import Genotype, NetworkShape, forward, parse_hidden
 from sensors import CORE_BODY, HALF_PI, n_inputs, read_inputs
 from terrain import spawn_height
 
@@ -62,10 +63,10 @@ TARGET_RADIUS: float = 0.1  # within this many metres the target counts as reach
 class SimConfig:
     """Everything that defines an evaluation. Identical across all conditions."""
 
-    duration: float = 15.0  # seconds of simulated time per episode
+    duration: float = 10.0  # seconds of simulated time per episode
     control_every: int = 10  # physics steps per network update (10 x 2 ms = 50 Hz)
     vision: bool = True  # the 10 terrain-sensing rays as extra inputs
-    n_hidden: int = 8
+    hidden_layers: str = "16"  # neurons per hidden layer, e.g. "16" or "8,8" (D6)
     ground_contact_weight: float = 0.5  # metres-equivalent for lying down all run
     upside_down_weight: float = 1.0  # metres-equivalent for being flipped all run
 
@@ -76,7 +77,9 @@ class SimConfig:
     @property
     def shape(self) -> NetworkShape:
         """The network shape, hence the genotype length."""
-        return NetworkShape(n_inputs(self.vision), self.n_hidden, N_OUTPUTS)
+        return NetworkShape(
+            n_inputs(self.vision), parse_hidden(self.hidden_layers), N_OUTPUTS
+        )
 
 
 def build_model(
@@ -264,9 +267,13 @@ def run_terrains(
     and saved as `terrain<i>.mjb` in `directory`. Every later run pointed at
     the same directory - the other migration policies with the same seed -
     reuses the saved files, so all conditions walk exactly the same ground.
-    A file is written under a temporary name and then renamed, so two runs
-    starting at once never read a half-written terrain.
+    Two runs starting at the same moment must not end up on different
+    terrain: each writes its candidate under a private name and publishes it
+    with `os.link`, which fails if the file already exists. The loser deletes
+    its own candidate and uses the winner's file. Paths are absolute, so a
+    run's `config.json` works from any directory.
     """
+    directory = directory.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     paths = []
     for index in range(n_terrains):
@@ -274,7 +281,12 @@ def run_terrains(
         if not path.exists():
             partial = directory / f"terrain{index}.{os.getpid()}.partial"
             mj.mj_saveModel(build_model(world_factory), str(partial), None)
-            os.replace(partial, path)
+            try:
+                os.link(partial, path)
+            except FileExistsError:
+                pass  # another run published first; use its terrain
+            finally:
+                partial.unlink()
         paths.append(str(path))
     return tuple(paths)
 

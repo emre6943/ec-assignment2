@@ -3,9 +3,10 @@
 import numpy as np
 import pytest
 
-from network import NetworkShape, forward, pack, random_genotype, unpack
+from network import NetworkShape, forward, pack, parse_hidden, random_genotype, unpack
 
-SHAPE = NetworkShape(n_inputs=5, n_hidden=3, n_outputs=4)
+SHAPE = NetworkShape(n_inputs=5, hidden=(3,), n_outputs=4)
+DEEP = NetworkShape(n_inputs=5, hidden=(3, 2), n_outputs=4)
 
 
 def test_weight_count_includes_biases() -> None:
@@ -17,7 +18,7 @@ def test_pack_inverts_unpack() -> None:
     w1, w2 = unpack(genotype, SHAPE)
     assert w1.shape == (6, 3)
     assert w2.shape == (4, 4)
-    np.testing.assert_array_equal(pack(w1, w2), genotype)
+    np.testing.assert_array_equal(pack([w1, w2]), genotype)
 
 
 def test_unpack_rejects_wrong_length() -> None:
@@ -42,3 +43,24 @@ def test_outputs_stay_in_tanh_range() -> None:
     outputs = forward(genotype, SHAPE, np.full(5, 10.0))
     assert outputs.shape == (4,)
     assert np.all(np.abs(outputs) <= 1.0)
+
+
+def test_two_hidden_layers() -> None:
+    assert DEEP.n_weights == (5 + 1) * 3 + (3 + 1) * 2 + (2 + 1) * 4
+    rng = np.random.default_rng(0)
+    genotype = random_genotype(DEEP, rng)
+    inputs = rng.normal(size=5)
+    w1, w2, w3 = unpack(genotype, DEEP)
+
+    hidden1 = np.tanh(np.append(inputs, 1.0) @ w1)
+    hidden2 = np.tanh(np.append(hidden1, 1.0) @ w2)
+    expected = np.tanh(np.append(hidden2, 1.0) @ w3)
+
+    np.testing.assert_allclose(forward(genotype, DEEP, inputs), expected)
+
+
+def test_parse_hidden() -> None:
+    assert parse_hidden("8") == (8,)
+    assert parse_hidden("8,8") == (8, 8)
+    with pytest.raises(ValueError, match="hidden layers"):
+        parse_hidden("0")

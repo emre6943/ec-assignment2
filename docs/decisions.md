@@ -17,23 +17,23 @@ Status legend:
 | # | Decision | Status | Current choice |
 |---|---|---|---|
 | D1 | Body | ✅ | `john_set.spider_16` |
-| D2 | World | ✅ | `RuggedTerrainWorld`, terrain varies between evaluations |
-| D2a | Spawn height on rugged terrain | 🟡 (bug fix) | Spawn above the highest ground under the legs |
+| D2 | World | ✅ | `RuggedTerrainWorld`, ARIEL defaults; one random terrain per seed (D10) |
+| D2a | Spawn height on rugged terrain | 🟡 **awaiting OK** | Spawn above the ground, `correct_collision_with_floor=False` |
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
 | D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed |
 | D4 | Controller outputs | 🟡 | One output per hinge (16), direct position control |
 | D5 | Controller inputs | ✅ | 34: joint angles + clock + target vector + tilt + 10 vision rays |
-| D6 | Network shape | 🟡 | Fixed MLP, one hidden layer; evolve weights only |
+| D6 | Network shape | ✅ (pilot) | Fixed MLP, one hidden layer of 16; evolve weights only (832 weights) |
 | D7 | Crossover | 🟡 | Neuron-level uniform crossover |
-| D8 | Mutation | 🟡 | Gaussian perturbation, fixed step size |
+| D8 | Mutation | ✅ (pilot) | Gaussian perturbation of every weight, σ = 0.05 |
 | D9 | Selection | 🟡 | Tournament (parents) + generational with elitism (survivors) |
 | D10 | Terrain and noisy fitness | ✅ | One fixed terrain per seed, shared by all conditions with that seed |
 | D11 | Island model settings | 🟡 | 4 islands, ring, migrate every 10 generations, replace worst |
-| D12 | Budget and stopping | 🟡 | 3,000 evaluations + plateau; ~4.5 min per run, ~2 h for 5 × 5 |
+| D12 | Budget and stopping | ✅ rule / 🟡 size | Fixed budget of 12,000 evaluations per run (proposed); 10 s episodes |
 | D13 | Baselines and controls | 🟡 | Random search + no-migration islands |
 | D14 | Final evaluation | 🟡 | Best controllers re-tested on unseen terrains |
 | D15 | Fitness function | ✅ (weights 🟡) | Distance + penalties for the core touching the ground and for being upside down |
-| D16 | Curriculum and early stopping | 🧪 being tested | Behind flags, off by default; compared against the plain run |
+| D16 | Curriculum and early stopping | ❌ rejected | Lost to the plain setup on one seed; kept behind flags, off by default |
 
 ---
 
@@ -53,18 +53,22 @@ remaining distance to a target 2 m away; lower is better):
 
 spider_16 was as good as spider_8 and more consistent, at twice the cost per evaluation.
 
-## D2. World — ✅ `RuggedTerrainWorld`, terrain changes between evaluations
+## D2. World — ✅ `RuggedTerrainWorld`, ARIEL defaults
 
 `RuggedTerrainWorld` draws a **new random Perlin-noise terrain every time it is
 constructed**. The terrain generator is called without a seed in
-`ariel/src/ariel/simulation/environments/heightmap_functions.py`. We keep that on purpose:
-the goal is a controller that copes with terrain it has not seen, not one tuned to a single
-map. In the literature this is **evaluating on randomised environments**. It is the same
-idea as adding noise to simulations so that controllers transfer to reality (Jakobi 1997;
-"domain randomisation" in robot learning).
+`ariel/src/ariel/simulation/environments/heightmap_functions.py`. We use the class exactly
+as shipped, and do not re-implement or seed it.
 
-**The consequence is that fitness is noisy.** The same controller scores differently on
-different terrains. How we deal with that is **D10**.
+- **Our first plan** was to give every generation new terrain, so evolution would produce a
+  controller that copes with ground it has not seen. In the literature this is
+  **evaluating on randomised environments**. It is the same idea as adding noise to
+  simulations so that controllers transfer to reality (Jakobi 1997; "domain
+  randomisation" in robot learning).
+- **In practice that made the fitness too noisy to learn** (experiment 1): the same
+  controller scores very differently on different terrains.
+- **What we do now:** each seed gets one random terrain for its whole run (D10), and
+  robustness is tested afterwards on unseen terrains (D14).
 
 Measured on 10 terrains each: final distance to the target, starting from 2.0, with the
 spawn fix from D2a applied.
@@ -79,7 +83,7 @@ The terrain scatters a controller's score by about ±0.12–0.14 m. That is **la
 what weak controllers achieve**. Averaging over *k* terrains shrinks the scatter by √*k*:
 about 0.08 m at *k* = 3 and 0.05 m at *k* = 10.
 
-## D2a. Spawn height on rugged terrain — 🟡 (a bug fix in our code)
+## D2a. Spawn height on rugged terrain — 🟡 (a bug fix in our code; awaiting the team's OK)
 
 **The template's spawn buries the robot in rugged terrain.**
 
@@ -92,6 +96,15 @@ about 0.08 m at *k* = 3 and 0.05 m at *k* = 10.
 
 Fix (`terrain.py`, our code only): sample the terrain under the leg span, spawn the robot
 2 cm above the highest point, and let it drop. With the fix, no run ended upside down.
+
+**This is the one place we pass a non-default ARIEL argument:** `world.spawn(...,
+correct_collision_with_floor=False)`. ARIEL's default is `True`, and the template passes
+`True` explicitly, but that default is what buries the robot. No ARIEL code is changed; it
+is an argument of ARIEL's public `spawn()` call, like the spawn position the template
+leaves to us.
+
+- It conflicts with the team rule in D2b ("no settings away from ARIEL's defaults").
+- **Recommendation: keep it**, and state it in Methods with the evidence above. Awaiting the team's OK.
 
 ## D2b. Bump height — ✅ ARIEL's default, untouched
 
@@ -152,9 +165,24 @@ evolutionary algorithms*, Journal of Heuristics 7(4). This is the key citation.
 cannot be measured directly. Instead we report:
 
 1. **Evaluations to reach a threshold**: the first evaluation count at which the best
-   fitness drops below a fixed distance (set from a pilot, e.g. 1.0 m).
+   fitness drops below a fixed threshold (set from the pilot; `analyze.py` uses 1.6 by
+   default, which the pilot's better settings reached within about 1,400 evaluations).
 2. **Area under the best-fitness curve**, which rewards being good early.
-3. **Final fitness** at the budget cap, measured on unseen terrains (D14).
+3. **Final fitness** at the budget cap, on the training terrain; robustness is reported
+   separately as the distance reached on unseen terrains (D14).
+
+**Statistics** (`analyze.py`), on the final fitness and the AUC:
+
+- **A Friedman test across all five conditions, blocked by seed.** Conditions with the
+  same seed walk the same terrain (D10), so each seed is a matched block. This asks: do
+  the conditions differ at all?
+- **Planned comparisons of each condition against `none`,** the no-migration control:
+  two-sided Mann-Whitney U tests with Holm's correction.
+- **Why not all pairs?** With 5 seeds per condition, the smallest possible Mann-Whitney
+  p-value is 0.008. Correcting for all 10 pairs would multiply it past 0.05, so nothing
+  could ever come out significant. Four planned comparisons can.
+- A paired Wilcoxon test is no use either: its smallest possible p with 5 pairs is 0.06.
+- **More seeds** would allow more comparisons, if compute allows.
 
 **Only the emigrant selection changes between conditions.** Island count, island size,
 migration interval, number of migrants, topology and replacement policy stay fixed (D11).
@@ -244,7 +272,7 @@ stick out.
 These readings are checked by `tests/test_sensors.py` on ARIEL's flat world, where the
 correct distances are known exactly.
 
-## D6. Network shape — 🟡 fixed MLP, evolve the weights only
+## D6. Network shape — ✅ one hidden layer of 16, chosen by a pilot
 
 **Weights only, or topology too?** There are two families of neuroevolution:
 
@@ -254,31 +282,50 @@ correct distances are known exactly.
   neurons and connections. It is powerful but much more complex, and a changing genome
   length would interfere with our migration research question.
 
-Recommendation: **fixed topology**, one hidden layer with `tanh` activations:
+We use a **fixed topology** with `tanh` activations. The code supports any number of
+hidden layers (`--hidden-layers 16`, or `8,8` for two):
 
 ```
-34 inputs ──► hidden (H, tanh) ──► 16 outputs (tanh × π/2)
+34 inputs ──► hidden (tanh) ──► 16 outputs (tanh × π/2)
 ```
 
-Genotype length for 34 inputs, plus a bias on every neuron:
+Genotype length, with a bias on every neuron:
 
-| H | weights |
+| Hidden layers | Weights |
 |---|---|
-| 8 | 35·8 + 9·16 = **424** |
-| 12 | 35·12 + 13·16 = **628** |
-| 16 | 35·16 + 17·16 = **832** |
+| 8 | 35·8 + 9·16 = 424 |
+| **16 (used)** | 35·16 + 17·16 = **832** |
+| 8, 8 | 35·8 + 9·8 + 9·16 = 496 |
 
-**Why one hidden layer?** A single hidden layer can already represent any smooth mapping
-from inputs to outputs in principle (the universal approximation theorem). Every extra layer
-adds weights, and each weight is one more dimension evolution has to search.
+**Trade-off:** more neurons or layers can express more complex gaits, but every weight is
+one more dimension evolution has to search. One hidden layer can already represent any
+smooth mapping in principle (the universal approximation theorem). A second layer also
+makes the neuron-level crossover less clean: only the last hidden layer's neurons can be
+kept fully intact (D7).
 
-**Why 8 neurons?** It is the smallest size that plausibly works, and it keeps the genotype
-at 424 weights. Small networks like this are standard in evolutionary robotics.
+**How we chose: a pilot** (`experiments/07_pilot.sh`, 2026-09-28). There is no way to know
+the best brain in advance, so we compared shapes and mutation step sizes (D8) under
+identical conditions:
 
-- More hidden neurons can express more complex gaits, but give a longer genotype, which
-  mutation must search through.
-- H = 8 is the default. A short pilot against H = 16 would check it.
-- This is a development choice, not part of the research question.
+- the same seed and terrain for all nine runs;
+- 4 × 20 individuals, 4,000 evaluations, 10 s episodes.
+
+Best fitness at the end (lower is better; standing still scores 2.0):
+
+| Brain | σ 0.05 | σ 0.1 | σ 0.2 |
+|---|---|---|---|
+| 1 layer × 8 | 1.58 | 1.56 | 1.60 |
+| 1 layer × 16 | **1.51** | 1.70 | 1.67 |
+| 2 layers × 8 | 1.57 | 1.57 | 1.72 |
+
+- **A second layer did not help.**
+- **16 vs 8 neurons** cannot be separated on one seed: 16 had the best end result, 8
+  improved fastest early on.
+- We took **one layer of 16**, the best end result. It costs nothing measurable, because
+  the physics dominates the simulation time.
+- **Limitation to state in the report:** this is a single-seed pilot, meant to pick
+  reasonable settings, not to prove one shape is better. It is a development choice, not
+  part of the research question.
 
 ## D7. Crossover — 🟡 neuron-level uniform crossover
 
@@ -315,7 +362,7 @@ of its incoming and outgoing weights from one parent, chosen at random.
   so their conventions mostly agree. Immigrants come from another lineage, so crossing
   them with natives is where the conventions problem would show.
 
-**How much comes from each parent?** For each of the 8 hidden neurons, a fair coin
+**How much comes from each parent?** For each of the 16 hidden neurons, a fair coin
 decides which parent it comes from. That neuron's 35 incoming weights (34 inputs + bias)
 and 16 outgoing weights are copied together. On average, half of the neurons come from
 each parent. The 16 output biases belong to no hidden neuron, so each is taken from a
@@ -325,20 +372,27 @@ Crossover probability: 0.5. The other half of the children are a copy of one par
 child is then mutated (D8). These values are identical across all research-question
 conditions.
 
-## D8. Mutation — 🟡 Gaussian perturbation, fixed σ
+## D8. Mutation — ✅ Gaussian perturbation, σ = 0.05 (chosen by the pilot)
 
-Every weight gets a small random nudge: `w ← w + N(0, σ²)`.
+Every weight gets a small random nudge: `w ← w + N(0, σ²)`. Weights start as N(0, 0.5²).
 
 - If σ is too large, children bear no resemblance to their parents and the search becomes
   random search.
 - If σ is too small, progress is glacial.
 
-Recommendation: mutate **every weight** with **σ = 0.1** (weights initialised as
-N(0, 0.5²)), and tune σ in a short pilot. A self-adapting σ is a well-known improvement,
-but it is another moving part and not our research question.
+**How we chose σ:** the same pilot as D6 compared σ = 0.05, 0.1 and 0.2.
+
+- **σ = 0.2 was the worst for every network shape**, and the slowest to reach even a modest
+  fitness: steps that big destroy gaits that already work.
+- **0.05 and 0.1 were close.** 0.05 gave the best result overall, so it is the default.
+
+A self-adapting σ is a well-known improvement, but it is another moving part and not our
+research question.
 
 Implemented with ariel's own `FloatMutator.gaussian`, which does exactly this. That keeps
-the EA "built on ariel.ec" as the template asks.
+the EA "built on ariel.ec" as the template asks. Its random stream is kept separate from
+our operators' stream (see `ea.operator_rng`): seeding both with the same number made the
+first mutations exact copies of initial weights, which the code review caught.
 
 ## D9. Selection — 🟡 tournament for parents, generational with elitism for survivors
 
@@ -411,51 +465,66 @@ migrate.
 | Replacement on arrival | Immigrants replace the island's worst | Fixed for all conditions |
 | Copy or move | Copy (the emigrant also stays home) | Standard; keeps island sizes constant |
 
-## D12. Budget and stopping — 🟡
+## D12. Budget and stopping — ✅ fixed budget; size chosen from the curves
 
-The spec says to stop when the fitness curve plateaus, not after a fixed number of
-generations. But comparing conditions fairly also needs **equal budgets**. So we use both:
+**Rule (team decision, 2026-09-28): every run stops after a fixed number of evaluations**,
+the same for all conditions and the baseline, as a fair comparison needs.
 
-- **A hard cap on evaluations** (default **3,000**), the same for all conditions and the
-  baseline.
-- **Plateau detection**: stop early when the mean best fitness of the last 20 generations
-  is not at least 1 cm better than the 20 before, and report where each run plateaued.
+- A plateau-detection rule existed first. It never fired: the budget always ran out
+  earlier, and the long run showed flat stretches of up to about 25 generations *followed
+  by further improvement*, so any short window would have stopped runs too early.
+- The spec's tips say to stop on a plateau, not a fixed count. We meet the intent by
+  **choosing the budget from where the curves flattened** in the pilot and in the long
+  single-seed run (improvement until about generation 115 with 4 × 40 individuals), and
+  say so in Methods.
 
-An "evaluation" is one individual walking its generation's terrain(s). Random search is
-budgeted the same way.
+An "evaluation" is one individual walking the run's terrain(s). Random search is budgeted
+the same way.
 
-**Measured cost** on this Mac (M3 Pro, 10 worker processes, vision on, 15 s episodes):
+**Episode length: 10 s** (team decision, 2026-09-28; the template uses 15 s). No robot
+comes close to reaching the target in 15 s, and a shorter episode cuts the simulation cost
+by a third. The fitness is the distance at the end, so robots simply cover less ground;
+that is the same for every condition.
 
-| Terrains per generation | One generation (80 individuals) | One run (3,000 evaluations) | 5 conditions × 5 seeds |
-|---|---|---|---|
-| **k = 1 (default)** | ~7 s | **~4.5 min** | **~2 h** |
-| k = 3 | ~21 s | ~13 min | ~5.5 h |
+**Measured cost** on this Mac (M3 Pro, 10 worker processes, vision on):
+
+| Setup | Speed | One run |
+|---|---|---|
+| 15 s episodes, 4 × 20, 3,000 evaluations | ~10 evaluations/s | ~5 min |
+| 15 s episodes, 4 × 40, 25,000 evaluations | ~5.4 evaluations/s (walkers get costlier) | 77 min |
+| 10 s episodes, 4 × 20, 4,000 evaluations (pilot) | ~7.5 evaluations/s (while other work ran) | ~9 min |
+
+**Proposed budget for the main experiment: 12,000 evaluations per run** (4 × 20
+individuals, about 166 generations, about 17 minutes per run).
+
+- The long run (experiment 5) kept improving until about 18,000 evaluations, with twice
+  the population and 15 s episodes.
+- 12,000 is the compromise that fits 5 conditions × 5 seeds into one night (about 7 h).
+- If the curves are still clearly falling at 12,000, say so in the Discussion, or re-run
+  with a larger budget if time allows.
 
 *Conditions* = best, worst, random, none, and random search.
-
-Other levers, if it must be cheaper:
-
-- **Episode length:** 10 s instead of 15 s is about 1.5× faster, but the robot has less
-  time to show progress.
-- **Budget:** 2,000 evaluations instead of 3,000 is 1.5× faster, but has to be checked
-  against where the curves plateau.
-- **Worker count:** 10 is about as fast as this Mac gets; more processes don't help.
 
 ## D13. Baselines and controls — 🟡
 
 - **Random search** with the same evaluation budget: required by the spec, and nearly free
   to implement. Implemented as the same loop with every child drawn at random instead of
   bred (`run.py --algorithm random_search`). It keeps the same elites, so the best random
-  networks found so far are carried along and re-evaluated just like the EA's.
+  networks found so far are carried along, just like the EA's.
 - **No migration** (4 isolated islands): the control condition for the research question.
   Without it we could not tell whether migration matters at all.
 
 ## D14. Final evaluation — 🟡 re-test on unseen terrains
 
-The fitness logged during a run comes from the terrain of that generation. For the headline
-numbers, take each run's final best controller and evaluate it on **20 fresh terrains it
-never saw** (a "test set"). Report the mean and spread per condition. This also answers
+The fitness logged during a run comes from the seed's training terrain. For the headline
+numbers, also take each run's final best controller and evaluate it on **20 fresh terrains
+it never saw** (a "test set"). Report the mean and spread per condition. This also answers
 "did we get a brain that adapts to changing terrain?".
+
+`unseen.py` does this; the 20 test terrains are generated once
+(`results/terrains/rugged/test/`) and shared by every run. **First result (pilot winner):**
+1.48 m on its training terrain against 1.92 ± 0.11 m on unseen terrain. The brains
+specialise to their own terrain (see `experiments/README.md`, experiment 7).
 
 ---
 
@@ -467,7 +536,7 @@ fitness = distance to the target at the end                     (walk there)
         + 1.0 × share of the run the robot is upside down        (stay upright)
 ```
 
-Lower is better. The fitness is averaged over the generation's terrains.
+Lower is better. With several terrains (`--n-terrains`), it is averaged over them.
 
 **Why:** real spiders carry their body on their legs; they don't drag it. At rest,
 spider_16's core lies on the ground (3 contact points, measured). So avoiding the ground
@@ -499,7 +568,7 @@ lies 0–0.5 m high, so the check is meaningless there.
 We log distance, ground contact and upside-down separately (`log.csv`, and tags on every
 individual in the database), so the report can show both.
 
-## D16. Curriculum and early stopping — 🧪 being tested (flags, off by default)
+## D16. Curriculum and early stopping — ❌ tried and rejected (flags, off by default)
 
 Two ideas from the team to reach good walkers faster and more cheaply. Both are
 implemented behind flags so they can be compared with the plain setup on the same seed
@@ -532,6 +601,18 @@ moment are what it gets.
 
 **Stopping at the target** (`--stop-at-target`): a walk ends once the core is within
 10 cm of the target.
+
+**Result** (`experiments/06_curriculum_vs_plain.sh`, one seed, same terrain and budget as
+the plain long run):
+
+- The curriculum run led early: 1.58 against 1.75 m at generation 20.
+- It then stalled around 1.55 m from generation 40, while the plain run kept improving to
+  1.46 m by generation 86.
+- It was also *slower* per generation: the movement reward bred more active robots, which
+  are costlier to simulate, and early stopping cut almost nothing.
+- The run was stopped at generation 86.
+- **Decision:** the plain setup is used; the options stay in the code behind flags as a
+  documented negative result.
 
 **Caveats for the report:**
 

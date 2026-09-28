@@ -26,26 +26,34 @@ def neuron_crossover(
 ) -> Genotype:
     """Uniform crossover that keeps every hidden neuron intact.
 
-    For each hidden neuron, the child copies ALL of that neuron's weights - its
-    incoming column in W1 (bias included) and its outgoing row in W2 - from one
-    parent, chosen by a fair coin. Mixing weights of one neuron from two
-    different parents usually breaks what the neuron did (the "competing
-    conventions" problem), so the neuron is the unit of inheritance.
+    For each hidden neuron, a fair coin picks the parent it comes from, and the
+    child copies that neuron's weights as a unit: its incoming column (bias
+    included) and, for neurons of the LAST hidden layer, also its outgoing row
+    into the output layer. Mixing weights of one neuron from two different
+    parents usually breaks what the neuron did (the "competing conventions"
+    problem), so the neuron is the unit of inheritance.
 
-    The output biases (last row of W2) belong to no hidden neuron; each one is
-    inherited from a random parent.
+    With one hidden layer this moves each hidden neuron completely (all its
+    in- and out-weights). With more layers, a neuron's outgoing weights into
+    the next hidden layer travel with the neuron they feed instead, since each
+    weight can only belong to one unit. The output biases belong to no hidden
+    neuron; each one is inherited from a random parent.
     """
-    a1, a2 = unpack(parent_a, shape)
-    b1, b2 = unpack(parent_b, shape)
+    matrices_a = unpack(parent_a, shape)
+    matrices_b = unpack(parent_b, shape)
+    child = [matrix.copy() for matrix in matrices_a]
 
-    from_b = rng.random(shape.n_hidden) < 0.5
-    w1 = np.where(from_b[np.newaxis, :], b1, a1)
-    w2 = a2.copy()
-    w2[:-1] = np.where(from_b[:, np.newaxis], b2[:-1], a2[:-1])
+    last_hidden = len(shape.hidden) - 1
+    for layer, n_neurons in enumerate(shape.hidden):
+        from_b = rng.random(n_neurons) < 0.5
+        child[layer][:, from_b] = matrices_b[layer][:, from_b]
+        if layer == last_hidden:
+            outgoing = child[layer + 1]
+            outgoing[:-1][from_b] = matrices_b[layer + 1][:-1][from_b]
 
     bias_from_b = rng.random(shape.n_outputs) < 0.5
-    w2[-1] = np.where(bias_from_b, b2[-1], a2[-1])
-    return pack(w1, w2)
+    child[-1][-1] = np.where(bias_from_b, matrices_b[-1][-1], matrices_a[-1][-1])
+    return pack(child)
 
 
 def tournament_select(
