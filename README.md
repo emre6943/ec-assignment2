@@ -101,6 +101,49 @@ Then, from inside this directory:
 
     uv run --project ../ariel python A2_template_2026.py
 
+## Code
+
+Every design choice, with its alternatives and rationale, is in
+[`docs/decisions.md`](docs/decisions.md). Read that first.
+
+| File | What it holds |
+|---|---|
+| `network.py` | The controller network and how a flat genotype maps onto its weights |
+| `sensors.py` | The 34 network inputs: hinge angles, clock, target direction, tilt, 10 vision rays |
+| `terrain.py` | A spawn height that clears the rugged ground (the template's spawn buries the robot) |
+| `simulate.py` | One fitness evaluation: build the world, walk, measure the distance |
+| `operators.py` | Neuron-level crossover and tournament selection |
+| `migration.py` | Emigrant selection (best / worst / random / none) and the ring migration |
+| `ea.py` | The island-model EA as `ariel.ec` operations |
+| `run.py` | Command line: one condition, one or more seeds |
+| `plot.py` | Fitness and diversity curves of one run (`run.png` in the run folder) |
+| `replay.py` | Watch a run's best network walk: video, or a live viewer window |
+| `compare.py` | Overlay several runs on the plain distance, by evaluations and by wall-clock time |
+| `tests/` | Unit tests for all of the above, plus a tiny end-to-end run |
+
+Run one condition for several seeds (each 3,000-evaluation run takes ~4.5 min on 10 cores):
+
+    uv run --project ../ariel python run.py --policy best --seeds 0 1 2 3 4
+    uv run --project ../ariel python run.py --algorithm random_search --seeds 0 1 2 3 4
+
+Then look at what happened:
+
+    uv run --project ../ariel python plot.py results/best/seed0     # -> results/best/seed0/run.png
+    uv run --project ../ariel python replay.py results/best/seed0   # -> a video in the same folder
+    uv run --project ../ariel python replay.py results/best/seed0 --viewer   # live window
+
+Every setting is a flag (`python run.py --help`). `--world flat` runs on ARIEL's flat
+world; it is for debugging only, since the experiment world is rugged. `--curriculum`,
+`--early-stop` and `--stop-at-target` switch on the options of decision D16. A 10-second smoke test:
+
+    uv run --project ../ariel python run.py --policy best --seeds 0 \
+        --max-evaluations 150 --island-size 6 --n-elites 1 --n-migrants 1 \
+        --migration-interval 2 --n-terrains 1 --duration 3 --out results/smoke
+
+Tests:
+
+    uv run --project ../ariel python -m pytest tests
+
 ## Measured baseline
 
 A single evaluation with random weights, gecko body, `SimpleFlatWorld`,
