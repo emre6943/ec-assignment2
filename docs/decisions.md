@@ -21,9 +21,9 @@ Status legend:
 | D2a | Spawn height on rugged terrain | 🟡 **awaiting OK** | Spawn above the ground, `correct_collision_with_floor=False` |
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
 | D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed |
-| D4 | Controller outputs | 🟡 | One output per hinge (16), direct position control |
-| D5 | Controller inputs | ✅ | 34: joint angles + clock + target vector + tilt + 10 vision rays |
-| D6 | Network shape | ✅ (pilot) | Fixed MLP, one hidden layer of 16; evolve weights only (832 weights) |
+| D4 | Controller outputs | 🟡 | One output per hinge (8 for spider_8; 16 for spider_16), direct position control |
+| D5 | Controller inputs | ✅ | 26 for spider_8 (34 for spider_16): joint angles + clock + target vector + tilt + 10 vision rays |
+| D6 | Network shape | ✅ (pilot) | Fixed MLP, one hidden layer of 16; evolve weights only (568 weights for spider_8, 832 for spider_16) |
 | D7 | Crossover | ✅ (experiment 12) | Neuron-level uniform crossover, p = 0.5; kept after testing it against mutation only |
 | D8 | Mutation | ✅ (pilot) | Gaussian perturbation of every weight, σ = 0.05 |
 | D9 | Selection | 🟡 | Tournament (parents) + generational with elitism (survivors) |
@@ -35,6 +35,9 @@ Status legend:
 | D15 | Fitness function | ✅ (weights 🟡) | Distance + penalties for the core touching the ground and for being upside down |
 | D16 | Curriculum and early stopping | ❌ rejected | Lost to the plain setup on one seed; kept behind flags, off by default |
 | D17 | Rhythm options and body/world rethink | ✅ | spider_8 on OlympicArena; rhythmic start (`--clock-boost 3`) on, tempo gene dropped |
+| D18 | Gait terms in the fitness | 🧪 piloting (exp. 16-17) | Contact penalty 1.0, carry term (4 cm line, weight 1.0), motor-work balance across legs (0.5) |
+| D19 | Stagnation rule for the mutation step | 🧪 piloting (exp. 16-17) | An island's σ doubles after 15 generations without progress; resets on progress |
+| D20 | Rewarding speed | 🧪 piloting (exp. 16-17) | + 0.5 × the walk-averaged distance to the target; walks end on arrival; episodes stay 15 s |
 
 ---
 
@@ -228,6 +231,9 @@ migration interval, number of migrants, topology and replacement policy stay fix
 Varying any of them as well would be a second research question.
 
 ## D4. Controller outputs — 🟡 one per hinge, direct position control
+
+*Numbers in D4-D6 are for spider_16, the body of experiments 1-12. The final body,
+spider_8 (D1), has 8 hinges: 8 outputs, 26 inputs and 27·16 + 17·8 = 568 weights.*
 
 **What is actually controlled?** The robot is built from modules: a core, bricks and
 hinges. Only the **hinges** have motors, and `spider_16` has 16 of them (`model.nu == 16`).
@@ -575,16 +581,15 @@ improving at 8,000 evaluations.
 | 15 s episodes, 4 × 40, 25,000 evaluations | ~5.4 evaluations/s (walkers get costlier) | 77 min |
 | 10 s episodes, 4 × 20, 4,000 evaluations (pilot) | ~7.5 evaluations/s (while other work ran) | ~9 min |
 
-**Proposed budget for the main experiment: 12,000 evaluations per run** (4 × 20
-individuals, about 166 generations, about 17 minutes per run).
+**Budget of the first main experiment (experiment 8): 12,000 evaluations per run** (4 × 20
+individuals, about 166 generations, about 17 minutes per run with 10 s episodes, 5
+conditions × 5 seeds in about 7 h; the standard EA was added later as a sixth).
 
 - The long run (experiment 5) kept improving until about 18,000 evaluations, with twice
   the population and 15 s episodes.
-- 12,000 is the compromise that fits 5 conditions × 5 seeds into one night (about 7 h).
-- If the curves are still clearly falling at 12,000, say so in the Discussion, or re-run
-  with a larger budget if time allows.
-
-*Conditions* = best, worst, random, none, and random search.
+- On OlympicArena, experiment 15 made 95% of its progress by 5,000 evaluations and its
+  last improvement at 8,800, then nothing until 48,600. So 12,000 covers the learning
+  phase plus a stretch of plateau, and stays the budget for experiment 14.
 
 ## D13. Baselines and controls — 🟡
 
@@ -631,6 +636,8 @@ fitness = distance to the target at the end                     (walk there)
 ```
 
 Lower is better. With several terrains (`--n-terrains`), it is averaged over them.
+This is the base fitness of experiments 1-15. From experiment 16 on, gait terms (D18) and
+a speed term (D20) are added, each behind its own flag.
 
 **Why:** real spiders carry their body on their legs; they don't drag it. At rest,
 spider_16's core lies on the ground (3 contact points, measured). So avoiding the ground
@@ -799,6 +806,138 @@ CPG; nothing forbids it, but it is not worth the risk:
   helped there.
 
 The clock therefore stays a fixed 1 Hz input. The tempo code stays behind its flag, off.
+
+## D18. Gait terms in the fitness — 🧪 piloting (experiments 16-17)
+
+**Why.** The best brain of experiment 15 reaches 0.84 m from the target, but on video it
+does not walk like a spider (measured over its 15 s walk):
+
+- its core touches the ground 8% of the time, which the 0.5 contact weight prices at only
+  0.04;
+- the core rides on average 1.6 cm above lying height, although spider_8 can hold it
+  about 6 cm up (D17): it crouches;
+- one leg is tucked away: its two hinges sit at −85° and +85°, near their limits, and
+  the network commands only 5–9° of movement there, against 17–77° for the other legs.
+
+**The terms** (flags, all off by default; `simulate.py`):
+
+- `--ground-contact-weight 1.0` (was 0.5): lying on the ground costs twice as much.
+- `--low-body-weight 0.5`, the **carry term**: at every network update, how far the core
+  is below "carried", `clip(1 − lift / 2 cm, 0, 1)`, averaged over the walk. `lift` is the
+  core's height above lying height over the ground under it. 0 once the core is at least
+  2 cm up, 1 lying down. Emre asked for it to be lenient: anything above 1–2 cm counts as
+  carried, so the term only punishes crouching, not a low but working gait. Unlike the
+  contact penalty, it keeps rewarding every millimetre up to the line, which gives
+  evolution a gradient to follow.
+- `--leg-imbalance-weight 0.5`, the **leg-balance term**: each leg's movement is the
+  summed spread (standard deviation) of its hinges' angles over the walk. With four legs,
+  each should do about a quarter. The term is `1 − least-used leg / mean leg`: 0 when all
+  legs move alike, 1 when one never moves. The legs are found from the body tree
+  (`bodies.limbs`): every branch hanging off the core is one limb.
+
+Experiment 15's best brain would score 0.30 on the carry term and 0.34 on leg balance:
+fitness 1.23 instead of 0.88. The distance still dominates; the terms decide between
+walkers that get equally far.
+
+**Round 1 result (experiment 16, `gait`).** The terms worked on posture: core on the
+ground 8% → 0.5% of the time, carry term 0.30 → 0.13, leg imbalance 0.34 → 0.09. But the
+robot ended further away (1.11 m against 0.84 m) and, on video, still barely stood, with
+one leg doing little. Measured per leg (our own analysis script, contact forces and
+actuator power from MuJoCo):
+
+| leg | weight carried | net push towards the target | positive motor work |
+|---|---|---|---|
+| 0 | 30% | +0.4 | 40 J |
+| 1 | 27% | −10.6 (brakes) | 39 J |
+| 2 | 24% | +0.3 | 22 J |
+| 3 | 19% | +13.3 | 32 J |
+
+- Every leg carries 19-30% of the weight, so a load-sharing term (Emre's first idea)
+  would not catch the lazy leg: it is a *prop* that holds the body up but does not drive.
+- The joint-movement measure does not catch it either (0.09): the leg moves, but its
+  motors do little.
+- Motor work does: 22 J against up to 40 J here, and 8 J against about 27 J for the
+  tucked leg of experiment 15.
+- Pushing is lopsided (one leg drives, one brakes), but forcing every leg to push
+  equally would prescribe an unnatural gait: in real four-legged gaits the front legs
+  partly brake. The speed term already charges for legs fighting each other.
+- The core rode 2.5 cm up on average (34% of the time under 2 cm, never above 4.7 cm).
+  A heavier carry weight alone cannot make it stand taller, because the term stops
+  rewarding at its line.
+
+**Round 2 (experiment 17), the current proposal:**
+
+- **leg term → motor-work share** (`--work-imbalance-weight 0.5`, movement term off):
+  each leg's positive motor work (torque × joint speed when the motor drives the joint,
+  sampled at every network update), and `1 − least-working leg / mean leg`. 0 when every
+  leg works alike, 1 when one leg's motors are idle.
+- **carry line 2 cm → 4 cm, weight 0.5 → 1.0** (`--carry-height 0.04 --low-body-weight
+  1.0`): every millimetre of lift up to 4 cm now pays. spider_8 can hold 6.1 cm (D17), so
+  4 cm is demanding but reachable.
+
+**Caveats for the report.** This is behavioural shaping: we prescribe part of *how* to
+walk, not only where to go. The spec allows our own metric if it is clearly defined.
+A robot could game the leg term by jiggling a useless leg, so we check the videos. The
+last time we added posture terms (experiment 3) they did not help, but that was on noisy
+rugged terrain. Every condition of the research question uses the same fitness.
+
+## D19. Stagnation rule for the mutation step — 🧪 piloting (experiments 16-17)
+
+**Why.** Experiment 15 stopped improving after about 9,000 evaluations and never moved
+again (225 generations), with the genotype spread collapsed from 14 to about 1.5. The
+data of experiment 8 show that the migration policy does not prevent this *inside* an
+island: migrating the worst keeps the islands different from each other (spread 13.9 vs
+2.8 when migrating the best), but within every island the spread ends at 2.4–3.0 whatever
+the policy, and the final fitness is the same.
+
+**Why not self-adaptive σ** (each individual carries its own σ, the textbook ES method,
+Eiben & Smith ch. 4): a σ only spreads when a child *beats* its parents. On a plateau no
+child ever does, so the σ values drift and die with their children; self-adaptation
+cannot get an island off a plateau.
+
+**First result (experiment 16, `gait_stall`, stopped at 9,400 evaluations):** by then
+every island had doubled its σ up to the 0.4 maximum without improving, and the best
+fitness (1.986) was no better than without the rule. One seed, and the fitness was being
+revised at the time; experiment 17 tests it again with the revised fitness.
+
+**The rule** (`--stall-generations 15`, off at 0; `ea.next_sigma`): per island, when its
+best has not improved for 15 generations, its σ doubles (0.05 → 0.1 → 0.2 → 0.4 at most,
+`--max-sigma`); it drops back to 0.05 as soon as the island improves. This is a
+deterministic, feedback-based parameter control (Eiben & Smith ch. 8). The island's
+elites are always kept, so a wide step cannot lose the best gait found so far: it only
+lets the children search further away. The same rule runs in every condition; migration
+can reset an island's σ by bringing in a better individual, which is part of what
+migration does in this EA and belongs in the Discussion.
+
+## D20. Rewarding speed — 🧪 piloting (experiments 16-17)
+
+**Why.** The fitness so far only looks at where the robot ends. A robot that closes 1 m
+in 10 s and one that needs all 15 s score the same, and so do a robot that arrives after
+8 s and one that arrives after 14 s. Emre wants the faster one to win in both cases.
+
+**The term** (`--speed-weight 0.5 --stop-at-target`; `simulate.walk`): the distance to
+the target averaged over every network update of the full 15 s walk.
+
+- Closing distance early lowers the average: from 2 m, reaching 1 m at 10 s and holding
+  averages 1.33 m; reaching 1 m only at 15 s averages 1.50 m.
+- With `--stop-at-target` the walk ends when the core is within 0.1 m of the target, and
+  the rest of the walk counts as distance 0: arriving at 8 s beats arriving at 14 s. This
+  also saves simulation time once robots start arriving.
+- Moving away from the target raises the average, so only speed in the right direction
+  counts.
+
+**Why not ARIEL's `fitness_speed_to_target`** (arrival time ÷ duration if the robot
+arrives, else 1 + its closest distance): it rewards speed only after arrival, so the two
+robots that each closed 1 m would still tie, and no robot reaches the OlympicArena target
+yet. Among robots that do arrive, our term orders them the same way: earlier is better.
+
+**Rejected: episode length growing with progress** (Emre's idea: 5, 10, 15, 20 s blocks
+as the population gets better, to save budget early and favour fast brains). The research
+question compares fitness-versus-evaluations curves; a longer episode makes every robot
+score better at once, and with progress-triggered switches each condition would change
+episode length at a different moment, so the curves could no longer be compared. It
+would also force re-evaluating every elite at each switch, and very short walks favour
+lunging over gaits (the same trap as the curriculum of D16). Episodes stay a fixed 15 s.
 
 ## References (to verify when writing the report)
 

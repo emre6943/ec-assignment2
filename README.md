@@ -81,7 +81,8 @@ close to the spec's "no CPG" rule (D17).
       + 0.5 × share of the walk with the body on the ground
       + 1.0 × share of the walk upside down
 
-Standing still scores 2.0.
+Standing still scores 2.0. The final setup adds gait terms (carry the body, every leg does
+its share of the work) and a speed term; see decisions D18 and D20.
 
 **The EA:** 4 islands of 20 networks each, in a ring. Every generation, on each island:
 
@@ -167,7 +168,8 @@ to `results/<condition>/`, where experiment 8's results live.
   *different* terrain on your laptop than on someone else's. For the final results, one
   person runs everything on one machine, or shares their `results/terrains/` folder.
 - **Options we tried and rejected** stay available for experimenting:
-  - `--curriculum`, `--early-stop` and `--stop-at-target` (decision D16);
+  - `--curriculum` and `--early-stop` (decision D16); `--stop-at-target` is used again,
+    with the speed term (D20);
   - `--terrain-mode per_generation` (D10).
 
   See `experiments/README.md` for what they did.

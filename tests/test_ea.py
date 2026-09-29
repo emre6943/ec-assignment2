@@ -19,7 +19,7 @@ import pytest
 from ariel.ec import FloatMutator, set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 
-from ea import EAConfig, Experiment, check_config, operator_rng
+from ea import EAConfig, Experiment, check_config, next_sigma, operator_rng
 from replay import make_controller
 from run import as_standard, finished_with
 from simulate import SimConfig, build_model
@@ -217,3 +217,24 @@ def test_a_run_with_another_body_and_the_rhythm_options(
     finally:
         mj.set_mjcb_control(None)
     assert np.all(np.isfinite(data.ctrl)) and np.any(data.ctrl != 0.0)
+
+
+def test_stagnation_rule_widens_then_resets_sigma() -> None:
+    config = EAConfig(mutation_sigma=0.05, stall_generations=3, max_sigma=0.15)
+    sigma, stall = 0.05, 0
+    history = []
+    for _ in range(9):
+        sigma, stall = next_sigma(config, sigma, stall, improved=False)
+        history.append(sigma)
+    assert history == [0.05, 0.05, 0.1, 0.1, 0.1, 0.15, 0.15, 0.15, 0.15]
+    assert next_sigma(config, sigma, stall, improved=True) == (0.05, 0)
+    assert next_sigma(EAConfig(), 0.05, 7, improved=False) == (0.05, 7)  # off
+
+
+def test_a_run_logs_the_gait_terms_and_sigma(tmp_path: Path, pool: Pool) -> None:
+    config = replace(tiny_config("best"), stall_generations=1)
+    rows = run_tiny(config, tmp_path / "run", pool)
+    for row in rows:
+        assert 0.0 <= float(row["low_body"]) <= 1.0
+        assert 0.0 <= float(row["leg_imbalance"]) <= 1.0
+        assert config.mutation_sigma <= float(row["sigma"]) <= config.max_sigma

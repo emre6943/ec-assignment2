@@ -78,10 +78,15 @@ LOG_COLUMNS: tuple[str, ...] = (
     "worst",
     "best_final",
     "best_distance",
+    "best_mean_distance",
     "ground_contact",
     "upside_down",
+    "low_body",
+    "leg_imbalance",
+    "work_imbalance",
     "mean_seconds",
     "spread",
+    "sigma",
     "immigrants",
     "seconds",
 )
@@ -106,6 +111,11 @@ class EAConfig:
     tournament_size: int = 3
     crossover_probability: float = 0.5
     mutation_sigma: float = 0.05  # chosen by the pilot (D8)
+    # Stagnation rule (decision D19); off at 0. When an island's best has not
+    # improved for `stall_generations` generations, its sigma doubles (up to
+    # `max_sigma`); it drops back to `mutation_sigma` when the island improves.
+    stall_generations: int = 0
+    max_sigma: float = 0.4
     mutation_rate: float = 1.0
     init_scale: float = 0.5
     clock_boost: float = 1.0  # clock-input weights x this in new random genotypes (D17)
@@ -144,6 +154,10 @@ def check_config(config: "EAConfig") -> None:
         problems.append("curriculum_generations must be at least 1")
     if config.migration_interval < 1:
         problems.append("migration_interval must be at least 1")
+    if config.stall_generations < 0:
+        problems.append("stall_generations must be 0 (off) or more")
+    if config.max_sigma < config.mutation_sigma:
+        problems.append("max_sigma must be at least mutation_sigma")
     if problems:
         raise ValueError("; ".join(problems))
 
@@ -159,6 +173,25 @@ def operator_rng(seed: int) -> np.random.Generator:
     (seed, 1) keeps the two streams independent and still reproducible.
     """
     return np.random.default_rng((seed, 1))
+
+
+def next_sigma(
+    config: EAConfig, sigma: float, stall: int, improved: bool
+) -> tuple[float, int]:
+    """One generation of the stagnation rule (D19): (new sigma, generations stalled).
+
+    Off (`stall_generations` 0): sigma never changes. An improvement resets
+    sigma to `mutation_sigma`; every `stall_generations` generations without
+    one double it, up to `max_sigma`.
+    """
+    if config.stall_generations == 0:
+        return sigma, stall
+    if improved:
+        return config.mutation_sigma, 0
+    stall += 1
+    if stall >= config.stall_generations:
+        return min(2.0 * sigma, config.max_sigma), 0
+    return sigma, stall
 
 
 def new_individual(
@@ -215,6 +248,10 @@ class Experiment:
 
         self.generation = 0
         self.evaluations = 0
+        # Per-island mutation step and stagnation bookkeeping (decision D19).
+        self.island_sigma = [config.mutation_sigma] * config.n_islands
+        self.island_best = [float("inf")] * config.n_islands
+        self.island_stall = [0] * config.n_islands
         self.best_genotype: list[float] = []
         self.best_fitness = float("inf")
         self.started_at = time.time()
@@ -266,8 +303,23 @@ class Experiment:
             clock_boost=self.config.clock_boost,
         )
 
+    def update_sigma(self, island: int, best: float) -> None:
+        """The stagnation rule (D19): widen a stuck island's mutation step.
+
+        The island's elites are always kept, so a wider step cannot lose the
+        best gait found so far; it only makes the children search further away.
+        """
+        improved = best < self.island_best[island]
+        self.island_best[island] = min(best, self.island_best[island])
+        self.island_sigma[island], self.island_stall[island] = next_sigma(
+            self.config, self.island_sigma[island], self.island_stall[island], improved
+        )
+
     def make_child(
-        self, members: list[Individual], fitness: npt.NDArray[np.float64]
+        self,
+        members: list[Individual],
+        fitness: npt.NDArray[np.float64],
+        sigma: float,
     ) -> Genotype:
         """Tournament -> (maybe) neuron crossover -> Gaussian mutation."""
         if self.config.algorithm == "random_search":
@@ -286,7 +338,7 @@ class Experiment:
             child = parent_a
         mutated = FloatMutator.gaussian(
             child.tolist(),
-            std=self.config.mutation_sigma,
+            std=sigma,
             mutation_probability=self.config.mutation_rate,
         )
         return np.asarray(mutated, dtype=np.float64)
@@ -307,6 +359,7 @@ class Experiment:
         for island in range(self.config.n_islands):
             members = island_members(population, island)
             fitness = np.array([member.fitness for member in members])
+            self.update_sigma(island, float(fitness.min()))
             for rank, index in enumerate(np.argsort(fitness)[: self.config.n_elites]):
                 elite = members[index]
                 if self.fixed_terrain and not self.early_stop_bar_changing():
@@ -321,9 +374,8 @@ class Experiment:
                     copy = new_individual(elite.genotype, island, elite=rank)
                 next_generation.append(copy)
             for _ in range(self.config.island_size - self.config.n_elites):
-                next_generation.append(
-                    new_individual(self.make_child(members, fitness), island)
-                )
+                child = self.make_child(members, fitness, self.island_sigma[island])
+                next_generation.append(new_individual(child, island))
 
         for individual in population:
             individual.alive = False
@@ -451,8 +503,8 @@ class Experiment:
         for island in range(self.config.n_islands):
             members = island_members(population, island)
             everyone.extend(members)
-            rows.append(self.stats_row(str(island), members))
-        rows.append(self.stats_row("all", everyone))
+            rows.append(self.stats_row(str(island), members, self.island_sigma[island]))
+        rows.append(self.stats_row("all", everyone, float(np.mean(self.island_sigma))))
 
         with self.log_path.open("a", newline="") as handle:
             csv.writer(handle).writerows(rows)
@@ -480,15 +532,21 @@ class Experiment:
         )
         return population
 
-    def stats_row(self, island: str, members: list[Individual]) -> list[object]:
+    def stats_row(
+        self, island: str, members: list[Individual], sigma: float
+    ) -> list[object]:
         """Fitness statistics and genotype spread for a group of individuals.
 
         `best`, `mean` and `worst` use this generation's fitness (which in a
         curriculum run still includes the movement reward); `best_final` is
         the best FINAL fitness (no movement reward), comparable across runs.
-        `best_distance` is the shortest distance to the target in the group;
+        `best_distance` is the shortest distance to the target in the group,
+        `best_mean_distance` the lowest walk-averaged distance (D20);
         `ground_contact` and `upside_down` are the group's MEAN fractions of
-        the run spent with the core on the ground and upside down.
+        the run spent with the core on the ground and upside down;
+        `low_body`, `leg_imbalance` and `work_imbalance` are the group's means
+        of those measurements (D18). `sigma` is the island's current mutation step
+        (the mean over islands for "all"; D19).
 
         `spread` is the mean Euclidean distance of the genotypes to their
         centroid: how different the group's networks are. Comparing islands'
@@ -522,10 +580,15 @@ class Experiment:
             f"{fitness.max():.4f}",
             f"{min(final):.4f}",
             f"{parts['distance'].min():.4f}",
+            f"{parts['mean_distance'].min():.4f}",
             f"{parts['ground_contact'].mean():.4f}",
             f"{parts['upside_down'].mean():.4f}",
+            f"{parts['low_body'].mean():.4f}",
+            f"{parts['leg_imbalance'].mean():.4f}",
+            f"{parts['work_imbalance'].mean():.4f}",
             f"{parts['seconds'].mean():.2f}",
             f"{spread:.4f}",
+            f"{sigma:.4f}",
             immigrants,
             f"{time.time() - self.started_at:.1f}",
         ]

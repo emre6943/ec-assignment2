@@ -7,6 +7,8 @@ needs to know about a body is measured once from the compiled robot:
              of joint-angle inputs
 - `reach`    how far (in metres, in the ground plane) the robot extends from its
              core at rest - the area the spawn height must clear
+- `legs`     which hinges belong to which limb: every limb is one branch of the
+             body tree hanging off the core (spider_8: four legs of two hinges)
 
 Why the body is a setting (decision D1): spider_16's motors cannot lift its
 body. Every John Set motor is capped at 0.66 N·m, and no static pose raises
@@ -55,6 +57,7 @@ class BodyInfo:
 
     hinges: int
     reach: float
+    legs: tuple[tuple[int, ...], ...]  # hinge indices (into qpos[7:]) per limb
 
 
 def build_body(name: str) -> CoreModule:
@@ -77,4 +80,21 @@ def body_info(name: str) -> BodyInfo:
     robot_geoms = [g for g in range(model.ngeom) if model.geom_bodyid[g] != 0]
     offsets = data.geom_xpos[robot_geoms, :2] - data.xpos[core, :2]
     reach = float(np.linalg.norm(offsets, axis=1).max())
-    return BodyInfo(hinges=int(model.nu), reach=reach)
+    return BodyInfo(hinges=int(model.nu), reach=reach, legs=limbs(model, core))
+
+
+def limbs(model: mj.MjModel, core: int) -> tuple[tuple[int, ...], ...]:
+    """The hinges of every limb, grouped by the core's child they hang from."""
+    groups: dict[int, list[int]] = {}
+    for joint in range(model.njnt):
+        if model.jnt_type[joint] != mj.mjtJoint.mjJNT_HINGE:
+            continue
+        branch = model.jnt_bodyid[joint]
+        while model.body_parentid[branch] != core:
+            branch = model.body_parentid[branch]
+            if branch == 0:
+                msg = f"hinge {model.joint(joint).name} is not below the core"
+                raise ValueError(msg)
+        # qpos[0:7] is the core's free joint; hinge angles follow it.
+        groups.setdefault(branch, []).append(int(model.jnt_qposadr[joint]) - 7)
+    return tuple(tuple(hinges) for hinges in groups.values())

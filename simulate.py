@@ -1,8 +1,12 @@
 """One fitness evaluation: let the network walk on the given terrains, measure.
 
     fitness = distance to the target at the end            (walk there)
+            [ + w x the distance to the target averaged over the walk (fast; D20) ]
             + 0.5 x fraction of the run the core touches the ground   (stand)
             + 1.0 x fraction of the run the robot is upside down      (stay upright)
+            [ + w x how low the core is carried, 0 at >= carry_height up (D18) ]
+            [ + w x how much the least-used leg lags the others    (D18) ]
+            [ + w x how much the laziest leg's motors lag the others (D18) ]
             [ - a fading reward for moving at all, in curriculum runs (D16) ]
 
 averaged over the terrains the run walks. LOWER IS BETTER. `walk` only measures
@@ -48,7 +52,7 @@ from bodies import DEFAULT_BODY, body_info, build_body
 from genome import genotype_length, split
 from network import Genotype, NetworkShape, forward, parse_hidden
 from sensors import CORE_BODY, HALF_PI, n_inputs, read_inputs
-from terrain import ground_geoms, spawn_height
+from terrain import CORE_ABOVE_LOWEST_POINT, ground_geoms, ground_height, spawn_height
 
 SPAWN_XY: tuple[float, float] = (0.0, 0.0)
 TARGET_XY: npt.NDArray[np.float64] = np.array([2.0, 0.0])
@@ -58,6 +62,9 @@ TARGET_XY: npt.NDArray[np.float64] = np.array([2.0, 0.0])
 FAILED_FITNESS: float = 10.0
 FELL_OUT_OF_WORLD_Z: float = -1.0
 TARGET_RADIUS: float = 0.1  # within this many metres the target counts as reached
+# The core counts as carried once its underside is this far above the ground
+# under it (decision D18). The default is lenient; spider_8 can hold about 6 cm.
+CARRY_HEIGHT: float = 0.02
 
 
 @dataclass(frozen=True)
@@ -72,6 +79,11 @@ class SimConfig:
     evolve_tempo: bool = False  # a tempo gene sets the clock (genome.py, D17)
     ground_contact_weight: float = 0.5  # metres-equivalent for lying down all run
     upside_down_weight: float = 1.0  # metres-equivalent for being flipped all run
+    low_body_weight: float = 0.0  # for a core carried below carry_height all run (D18)
+    carry_height: float = CARRY_HEIGHT  # metres of lift that count as carried (D18)
+    leg_imbalance_weight: float = 0.0  # for one leg never moving (D18)
+    work_imbalance_weight: float = 0.0  # for one leg's motors never working (D18)
+    speed_weight: float = 0.0  # x the walk's average distance to the target (D20)
 
     # Ending a walk early (decision D16); all off by default.
     stop_at_target: bool = False  # end the walk once the target is reached
@@ -131,9 +143,13 @@ class Score:
     ground_contact: float  # share of the walk the core touched the ground
     upside_down: float  # share of the walk the robot was upside down
     seconds: float  # simulated seconds actually walked (less if stopped early)
+    low_body: float = 0.0  # 0 = carried at least carry_height up all run, 1 = lying
+    leg_imbalance: float = 0.0  # 0 = every leg moves equally, 1 = one leg never moves
+    mean_distance: float = 0.0  # distance to the target averaged over the whole walk
+    work_imbalance: float = 0.0  # 0 = every leg's motors work equally, 1 = one idle
 
 
-FAILED_SCORE = Score(FAILED_FITNESS, 0.0, 1.0, 1.0, 0.0)
+FAILED_SCORE = Score(FAILED_FITNESS, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, FAILED_FITNESS, 1.0)
 
 
 def fitness(score: Score, config: SimConfig, movement_weight: float = 0.0) -> float:
@@ -151,8 +167,67 @@ def fitness(score: Score, config: SimConfig, movement_weight: float = 0.0) -> fl
         score.distance
         + config.ground_contact_weight * score.ground_contact
         + config.upside_down_weight * score.upside_down
+        + config.low_body_weight * score.low_body
+        + config.leg_imbalance_weight * score.leg_imbalance
+        + config.work_imbalance_weight * score.work_imbalance
+        + config.speed_weight * score.mean_distance
         - movement_weight * score.displacement
     )
+
+
+def carry_shortfall(core_height: float, carry_height: float = CARRY_HEIGHT) -> float:
+    """How far the core is below "carried": 0 at `carry_height` up or more, 1 lying.
+
+    `core_height` is the core centre's height above the ground under it; the
+    core lies on the ground at CORE_ABOVE_LOWEST_POINT.
+    """
+    lift = core_height - CORE_ABOVE_LOWEST_POINT
+    return float(np.clip(1.0 - lift / carry_height, 0.0, 1.0))
+
+
+def shortfall_of_least(per_leg: npt.NDArray[np.float64]) -> float:
+    """1 - (smallest leg's amount) / (mean over legs), in [0, 1].
+
+    0 when every leg has the same amount, 1 when one leg has none. Fewer than
+    two legs, or nothing at all, scores 0.
+    """
+    if len(per_leg) < 2 or per_leg.mean() < 1e-9:
+        return 0.0
+    return float(np.clip(1.0 - per_leg.min() / per_leg.mean(), 0.0, 1.0))
+
+
+def leg_imbalance(
+    angles: npt.NDArray[np.float64], legs: tuple[tuple[int, ...], ...]
+) -> float:
+    """How far the least-used leg falls short of an equal share of the movement.
+
+    `angles` holds the hinge angles over the walk (one row per sample). A leg's
+    movement is the summed spread (standard deviation) of its hinges' angles.
+    With n legs, each would do 1/n of the total if all moved alike:
+
+        1 - (least-used leg's movement) / (mean leg movement)
+
+    0 when every leg moves equally, 1 when one leg never moves. A body with a
+    single limb, or one that does not move at all, scores 0.
+    """
+    if len(legs) < 2 or len(angles) < 2:
+        return 0.0
+    spread = angles.std(axis=0)
+    return shortfall_of_least(np.array([spread[list(leg)].sum() for leg in legs]))
+
+
+def work_imbalance(
+    hinge_work: npt.NDArray[np.float64], legs: tuple[tuple[int, ...], ...]
+) -> float:
+    """How far the laziest leg's motors fall short of an equal share of the work.
+
+    `hinge_work` is the positive mechanical work (joules) each hinge's motor
+    did over the walk. A leg that only props the body up, or only waves in
+    the air, does little work; a leg that drives the gait does a lot.
+
+        1 - (least-working leg's work) / (mean leg work)
+    """
+    return shortfall_of_least(np.array([hinge_work[list(leg)].sum() for leg in legs]))
 
 
 def core_touches_ground(
@@ -204,8 +279,20 @@ def walk(
     start_xy = data.qpos[0:2].copy()
     start_distance = distance_to_target(start_xy, TARGET_XY)
 
+    legs = body_info(config.body).legs
     n_updates = round(config.duration / (model.opt.timestep * config.control_every))
     touching = flipped = updates = 0
+    shortfall = 0.0
+    angles = []
+    # Positive motor work per hinge, sampled at every network update: power
+    # (torque x joint speed, when the motor drives the joint) x update period.
+    hinge_work = np.zeros(model.nu)
+    update_period = model.opt.timestep * config.control_every
+    # The distance to the target summed over every update of the FULL walk
+    # (D20): after arriving (stop_at_target) the rest of the walk counts as 0;
+    # after a hopeless walk is stopped (D16) it counts as where it stopped.
+    distance_sum = 0.0
+    rest_distance = 0.0
     checked_progress = min_progress is None
     for _ in range(n_updates):
         # mj_step1 brings every derived quantity (body positions, orientations,
@@ -215,15 +302,24 @@ def walk(
 
         now_distance = distance_to_target(data.qpos[0:2], TARGET_XY)
         if config.stop_at_target and now_distance < TARGET_RADIUS:
-            break
+            break  # arrived: the rest of the walk counts as distance 0
         if not checked_progress and data.time >= config.early_stop_time:
             checked_progress = True
             if start_distance - now_distance < min_progress:
+                rest_distance = now_distance  # hopeless: it would stay about here
                 break
 
         updates += 1
+        distance_sum += now_distance
         touching += core_touches_ground(data, core_geom, ground)
         flipped += is_upside_down(data, core_id)
+        x, y, z = data.xpos[core_id]
+        shortfall += carry_shortfall(
+            z - ground_height(model, data, ground, x, y), config.carry_height
+        )
+        angles.append(data.qpos[7:].copy())
+        power = data.actuator_force * data.qvel[6 : 6 + model.nu]
+        hinge_work += np.maximum(power, 0.0) * update_period
         inputs = read_inputs(model, data, core_id, TARGET_XY, vision_ground, clock_hz)
         data.ctrl[:] = forward(weights, shape, inputs) * HALF_PI
         mj.mj_step2(model, data)
@@ -238,6 +334,11 @@ def walk(
         ground_contact=touching / max(updates, 1),
         upside_down=flipped / max(updates, 1),
         seconds=float(data.time),
+        low_body=shortfall / max(updates, 1),
+        leg_imbalance=leg_imbalance(np.asarray(angles), legs),
+        mean_distance=(distance_sum + rest_distance * (n_updates - updates))
+        / max(n_updates, 1),
+        work_imbalance=work_imbalance(hinge_work, legs),
     )
 
 
