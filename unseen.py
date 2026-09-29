@@ -37,9 +37,9 @@ from simulate import (
     Score,
     SimConfig,
     evaluate_task,
+    final_sim_config,
     fitness,
     run_terrains,
-    saved_sim_config,
 )
 
 TERRAIN_DIR = Path(__file__).parent / "results" / "terrains"
@@ -55,12 +55,12 @@ def test_terrain_dir(world: str, body: str) -> Path:
 
 
 def load_sim_config(run: Path) -> SimConfig | None:
-    """The run's SimConfig, or None if it was made by an older, incompatible version."""
+    """The SimConfig of the run's last walks, or None for an older, incompatible run."""
     config_file = run / "config.json"
     if not config_file.exists():
         return None
     try:
-        return saved_sim_config(json.loads(config_file.read_text())["sim"])
+        return final_sim_config(json.loads(config_file.read_text()))
     except (KeyError, ValueError):
         return None
 

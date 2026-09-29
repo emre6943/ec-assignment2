@@ -32,7 +32,7 @@ import json
 import shutil
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from multiprocessing.pool import Pool
 from pathlib import Path
 from typing import Literal
@@ -85,6 +85,7 @@ LOG_COLUMNS: tuple[str, ...] = (
     "leg_imbalance",
     "work_imbalance",
     "mean_seconds",
+    "duration",
     "spread",
     "sigma",
     "immigrants",
@@ -137,6 +138,12 @@ class EAConfig:
     early_stop_progress_end: float = 0.10
     curriculum_generations: int = 50
 
+    # Longer walks later in the run (decision D21); off at 0. From the first
+    # generation after `final_duration_from` evaluations on, every walk lasts
+    # `final_duration` seconds instead of `SimConfig.duration`.
+    final_duration: float = 0.0
+    final_duration_from: int = 6000
+
     # Budget (decision D12): a run stops after this many evaluations.
     max_evaluations: int = 12000
 
@@ -154,6 +161,10 @@ def check_config(config: "EAConfig") -> None:
         problems.append("curriculum_generations must be at least 1")
     if config.migration_interval < 1:
         problems.append("migration_interval must be at least 1")
+    if config.final_duration < 0:
+        problems.append("final_duration must be 0 (off) or positive")
+    if config.final_duration_from < 0:
+        problems.append("final_duration_from must be 0 or more")
     if config.stall_generations < 0:
         problems.append("stall_generations must be 0 (off) or more")
     if config.stall_generations > 0:
@@ -267,7 +278,12 @@ class Experiment:
 
         # Outputs of an earlier run in the same folder would otherwise survive
         # and be read as this run's (e.g. by analyze.py).
-        for stale in ("summary.json", "unseen.json", "best_genotype.npy"):
+        for stale in (
+            "summary.json",
+            "unseen.json",
+            "best_genotype.npy",
+            "best_genotype_short.npy",
+        ):
             (out / stale).unlink(missing_ok=True)
 
         self.log_path = out / "log.csv"
@@ -362,10 +378,12 @@ class Experiment:
         terrain an elite keeps its measurements (the simulation is
         deterministic). It is re-evaluated when the terrain changes every
         generation - its old measurements came from different ground (D10) -
-        and while the early-stop bar is still rising, because a walk measured
-        under a more lenient bar is not comparable (D16).
+        while the early-stop bar is still rising, because a walk measured
+        under a more lenient bar is not comparable (D16), and when the walks
+        get longer (D21).
         """
         self.generation += 1
+        lengthen = self.lengthen_due()
         next_generation = []
         for island in range(self.config.n_islands):
             members = island_members(population, island)
@@ -373,7 +391,11 @@ class Experiment:
             self.update_sigma(island, float(fitness.min()))
             for rank, index in enumerate(np.argsort(fitness)[: self.config.n_elites]):
                 elite = members[index]
-                if self.fixed_terrain and not self.early_stop_bar_changing():
+                if (
+                    self.fixed_terrain
+                    and not self.early_stop_bar_changing()
+                    and not lengthen
+                ):
                     copy = new_individual(
                         elite.genotype,
                         island,
@@ -387,6 +409,8 @@ class Experiment:
             for _ in range(self.config.island_size - self.config.n_elites):
                 child = self.make_child(members, fitness, self.island_sigma[island])
                 next_generation.append(new_individual(child, island))
+        if lengthen:
+            self.lengthen_walks()
 
         for individual in population:
             individual.alive = False
@@ -416,6 +440,33 @@ class Experiment:
     def early_stop_bar_changing(self) -> bool:
         """True while the early-stop bar is still rising."""
         return self.config.early_stop and self.schedule() < 1.0
+
+    def lengthen_due(self) -> bool:
+        """True when the walks should switch to `final_duration` now (D21)."""
+        return (
+            self.config.final_duration > 0
+            and self.sim.duration != self.config.final_duration
+            and self.evaluations >= self.config.final_duration_from
+        )
+
+    def lengthen_walks(self) -> None:
+        """Make every walk from now on last `final_duration` seconds (D21).
+
+        A fitness measured on the shorter walks does not compare with one on
+        the longer walks, so everything that compares fitness across
+        generations starts afresh: the elites walk again (`reproduce`), each
+        island's stagnation record restarts (its next generation counts as an
+        improvement, which resets its sigma), and so does the run's best. The
+        best network of the shorter walks is kept as `best_genotype_short.npy`.
+        """
+        if self.best_genotype:
+            np.save(
+                self.out / "best_genotype_short.npy", np.asarray(self.best_genotype)
+            )
+        self.sim = replace(self.sim, duration=self.config.final_duration)
+        self.island_best = [float("inf")] * self.config.n_islands
+        self.island_stall = [0] * self.config.n_islands
+        self.best_fitness = float("inf")
 
     # -- Operations, continued ------------------------------------------- #
 
@@ -556,8 +607,9 @@ class Experiment:
         `ground_contact` and `upside_down` are the group's MEAN fractions of
         the run spent with the core on the ground and upside down;
         `low_body`, `leg_imbalance` and `work_imbalance` are the group's means
-        of those measurements (D18). `sigma` is the island's current mutation step
-        (the mean over islands for "all"; D19).
+        of those measurements (D18). `duration` is this generation's walk length
+        (D21). `sigma` is the island's current mutation step (the mean over
+        islands for "all"; D19).
 
         `spread` is the mean Euclidean distance of the genotypes to their
         centroid: how different the group's networks are. Comparing islands'
@@ -598,6 +650,7 @@ class Experiment:
             f"{parts['leg_imbalance'].mean():.4f}",
             f"{parts['work_imbalance'].mean():.4f}",
             f"{parts['seconds'].mean():.2f}",
+            f"{self.sim.duration:g}",
             f"{spread:.4f}",
             f"{sigma:.4f}",
             immigrants,

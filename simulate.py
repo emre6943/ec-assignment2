@@ -35,7 +35,7 @@ individuals would no longer be compared fairly (D10).
 # Standard library
 import os
 from collections.abc import Callable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
 # Third-party libraries
@@ -184,6 +184,19 @@ def saved_sim_config(saved: dict[str, object]) -> SimConfig:
         msg = f"unknown settings {sorted(unknown)}: an older, incompatible config"
         raise ValueError(msg)
     return SimConfig(**{"body": FIRST_BODY, **saved})
+
+
+def final_sim_config(saved: dict[str, dict[str, object]]) -> SimConfig:
+    """The SimConfig a run's walks ended with, from its whole config.json.
+
+    That is its "sim" settings (`saved_sim_config`), with the longer walks if
+    the run switched to them (`ea.EAConfig.final_duration`, decision D21).
+    """
+    config = saved_sim_config(saved["sim"])
+    final_duration = float(saved.get("ea", {}).get("final_duration", 0.0))
+    if final_duration > 0:
+        return replace(config, duration=final_duration)
+    return config
 
 
 def fitness(score: Score, config: SimConfig, movement_weight: float = 0.0) -> float:

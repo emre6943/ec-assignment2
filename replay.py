@@ -38,7 +38,7 @@ from genome import split
 from network import Genotype, forward
 from run import WORLDS
 from sensors import CORE_BODY, HALF_PI, read_inputs
-from simulate import TARGET_XY, SimConfig, build_model, saved_sim_config
+from simulate import TARGET_XY, SimConfig, build_model, final_sim_config
 from terrain import ground_geoms
 
 
@@ -75,7 +75,7 @@ def main() -> None:
     args = parser.parse_args()
 
     run_config = json.loads((args.run / "config.json").read_text())
-    config = saved_sim_config(run_config["sim"])
+    config = final_sim_config(run_config)
     genotype = np.load(args.run / "best_genotype.npy")
     training_terrains = run_config.get("terrains", [])
     if args.flat:

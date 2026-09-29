@@ -13,8 +13,10 @@ number of evaluations spent:
 4. Each island's genotype spread: how different its networks still are.
    Migration makes islands more alike, so this is where its effect shows.
 
-Dotted vertical lines mark migration events. The dashed line at 2.0 m is where
-every robot starts; anything below it moved towards the target.
+Dotted vertical lines mark migration events; a dashed one marks where the
+walks got longer (decision D21), after which fitness is on a new scale. The
+dashed line at 2.0 m is where every robot starts; anything below it moved
+towards the target.
 """
 
 # Standard library
@@ -133,6 +135,23 @@ def plot_run(run: Path) -> Path:
     for axis in axes:
         for evaluations in migrations:
             axis.axvline(evaluations, color=GRID, linewidth=1, linestyle=":")
+
+    # Logs from before decision D21 have no duration column.
+    durations = everyone.get("duration")
+    if durations is not None and durations.nunique() > 1:
+        switch = everyone.loc[durations != durations.iloc[0], "evaluations"].iloc[0]
+        for axis in axes:
+            axis.axvline(switch, color=MUTED, linewidth=1.2, linestyle="--")
+        top.annotate(
+            f"walks {durations.iloc[0]:g} s -> {durations.iloc[-1]:g} s",
+            xy=(switch, 1.0),
+            xycoords=("data", "axes fraction"),
+            xytext=(4, -4),
+            textcoords="offset points",
+            va="top",
+            color=MUTED,
+            fontsize=9,
+        )
 
     figure.tight_layout(rect=(0, 0, 1, 0.97))
     path = run / "run.png"

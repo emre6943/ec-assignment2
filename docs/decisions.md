@@ -964,10 +964,104 @@ episode length at a different moment, so the curves could no longer be compared.
 would also force re-evaluating every elite at each switch, and very short walks favour
 lunging over gaits (the same trap as the curriculum of D16). Episodes stay a fixed 15 s.
 
+## D21. Longer walks late in the showcase run — 🧪 one run (experiment 20)
+
+**Why.** Every brain so far stalls where its 15 s training walk ends: walked for 30 s,
+experiment 18's best gets to 0.36 m from the target and stops at x = 1.7. The network has
+no memory, so it reacts only to what it senses now, and it never trained on the ground
+past where 15 s gets it. Emre wants one long run that reaches the target.
+
+**The rule** (`--final-duration 30 --final-duration-from 6000`; `ea.Experiment.lengthen_walks`):
+the run starts with 15 s walks, and from the first generation after 6,000 evaluations
+every walk lasts 30 s. Starting at 15 s lets the run first learn to walk at half the cost
+per evaluation (95% of experiment 15's progress came by 5,000 evaluations); the 30 s
+phase then trains on the rest of the way.
+
+At the switch, fitness values from the short walks stop being comparable with those from
+the long ones, so everything that compares fitness across generations starts afresh:
+
+- the elites walk again instead of keeping their scores;
+- each island's stagnation record (D19) restarts, which also resets its σ;
+- the run's best restarts. The best short-walk network is kept as
+  `best_genotype_short.npy`, and `best_genotype.npy` becomes the best long-walk network.
+
+The log's `duration` column records each generation's walk length, `plot.py` marks the
+switch, and `replay.py` and `unseen.py` walk the brain for the final length.
+
+**Why this does not contradict D20**, which rejected walk lengths that grow with progress:
+
+- D20 is about the research question. Experiment 14 keeps a fixed 15 s for every
+  condition, and its curves stay comparable. This rule is used in one single-seed
+  showcase run only.
+- The switch happens at a fixed evaluation count, not when the population reaches some
+  level, so it would happen at the same moment in every run anyway.
+- The re-evaluation cost D20 names is paid once: the 8 elites walk again.
+- The first phase is the proven 15 s walk, not a very short one that favours lunging.
+
+## D22. Parameter tuning — 🧪 running (experiments 19 and 19b)
+
+**What was tuned so far, and where:**
+
+| Parameter | Value | How it was chosen |
+|---|---|---|
+| Mutation σ | 0.05 | Pilot (experiment 7): spider_16, rugged, old fitness, 1 seed |
+| Network shape | 1 hidden layer of 16 | The same pilot |
+| Crossover | neuron-level, p = 0.5 | Tested in experiment 12 (5 seeds) |
+| Budget | 12,000 evaluations | From where the curves flatten (D12) |
+| Population | 4 × 20 | Literature value, never tuned (D11) |
+| Tournament size | 3 | Literature value, never tuned (D9) |
+| Elites | 2 per island | Literature value, never tuned (D9) |
+| Migration | 2 migrants every 10 generations | Literature value (D11) |
+
+Since the pilot, the body, the world, the inputs and the fitness have all changed, so
+even σ may no longer be right.
+
+**Design** (`experiments/19_tuning.sh`): one factor at a time around the current values,
+3 seeds each, 6,000 evaluations per run:
+
+| Factor | Values tried | Current |
+|---|---|---|
+| Mutation σ | 0.02, 0.1 | 0.05 |
+| Population | 4 × 10, 4 × 40 (elites and migrants scaled to keep their 10% share) | 4 × 20 |
+| Tournament size | 2, 5 | 3 |
+| Elites per island (part 2) | 1, 5 | 2 |
+| Mutation spread (part 2) | 10% of the weights with σ = 0.16 (the same expected step) | every weight, σ = 0.05 |
+| Crossover probability (part 2) | 0, 0.9 | 0.5 |
+
+Part 2 (`experiments/19b_tuning_more.sh`) runs right after part 1 with the same seeds and
+arenas, and is compared against part 1's `base`. The elite count is the survivor
+selection: every generation each island keeps its best few unchanged and replaces the
+rest with children. 5 elites of 20 comes close to a (μ + λ) scheme, where parents compete
+with their children.
+
+- **Seeds 100-102, not experiment 14's seeds 0-4.** The settings are then not tuned on
+  the same arenas that answer the research question, the usual split between tuning and
+  test instances.
+- **The random emigrant policy** favours none of the policies the research question
+  compares.
+- **The migration interval and count are not tuned.** They are the context of the
+  research question (which individuals migrate). They stay at the literature values
+  (Cantú-Paz 2001) and are the same for every condition.
+- **6,000 evaluations:** 95% of experiment 15's progress came by 5,000, and 6,000 is where
+  the showcase run (D21) switches to long walks.
+
+**Decision rule, fixed before the results:** a value replaces the current one only if its
+best fitness at 6,000 evaluations beats `base` on all three seeds (paired: the same arena)
+and on the mean. Otherwise the current value stays. With 3 seeds no test can reach
+significance (the smallest possible Mann-Whitney p is 0.1), so the rule asks for a
+consistent effect instead.
+
+**Limits:** one factor at a time misses interactions between factors (a larger population
+may want a different σ). A proper tuner (irace, SPOT, REVAC; Eiben & Smit 2011) would find
+those, but needs far more runs than we can afford. It would also measure each setting on
+noisy single runs just the same.
+
 ## References (to verify when writing the report)
 
 - Cantú-Paz, E. (2001). Migration policies, selection pressure, and parallel evolutionary
   algorithms. *Journal of Heuristics*, 7(4), 311–334.
+- Eiben, A. E., & Smit, S. K. (2011). Parameter tuning for configuring and analyzing
+  evolutionary algorithms. *Swarm and Evolutionary Computation*, 1(1), 19–31.
 - Gomez, F., & Miikkulainen, R. (1997). Incremental evolution of complex general behavior.
   *Adaptive Behavior*, 5(3–4), 317–342.
 - Eiben, A. E., & Smith, J. E. (2015). *Introduction to Evolutionary Computing* (2nd ed.).

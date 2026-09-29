@@ -9,7 +9,7 @@ import json
 import multiprocessing as mp
 import random
 from collections.abc import Iterator
-from dataclasses import replace
+from dataclasses import asdict, replace
 from itertools import pairwise
 from multiprocessing.pool import Pool
 from pathlib import Path
@@ -23,7 +23,7 @@ from ariel.simulation.environments import SimpleFlatWorld
 from ea import EAConfig, Experiment, check_config, next_sigma, operator_rng
 from replay import make_controller
 from run import as_standard, finished_with
-from simulate import SimConfig, build_model
+from simulate import SimConfig, build_model, final_sim_config
 
 TINY_SIM = SimConfig(duration=0.3, hidden_layers="4")
 
@@ -143,6 +143,8 @@ def test_operator_stream_is_independent_of_ariels_mutation_stream() -> None:
         ("n_migrants", 21),
         ("curriculum_generations", 0),
         ("migration_interval", 0),
+        ("final_duration", -1),
+        ("final_duration_from", -1),
     ],
 )
 def test_impossible_settings_are_rejected(setting: str, value: int) -> None:
@@ -262,3 +264,34 @@ def test_skip_done_reads_configs_from_before_new_settings(
     del saved["ea"]["stall_generations"], saved["sim"]["vision_rays"]
     saved_file.write_text(json.dumps(saved))
     assert finished_with(tmp_path / "run", config, TINY_SIM, "flat")
+
+
+def test_walks_get_longer_once_and_everyone_walks_again(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """D21: one switch, after `final_duration_from` evaluations; elites re-walk."""
+    config = replace(
+        tiny_config("best"),
+        final_duration=0.5,
+        final_duration_from=20,
+        stall_generations=1,
+    )
+    rows = [r for r in run_tiny(config, tmp_path / "run", pool) if r["island"] == "all"]
+    durations = [float(row["duration"]) for row in rows]
+    evaluations = [int(row["evaluations"]) for row in rows]
+    switch = durations.index(0.5)
+    assert set(durations[:switch]) == {TINY_SIM.duration}
+    assert set(durations[switch:]) == {0.5}
+    assert evaluations[switch - 2] < 20 <= evaluations[switch - 1]
+    assert evaluations[switch] - evaluations[switch - 1] == (
+        config.n_islands * config.island_size
+    )
+    assert float(rows[switch]["mean_seconds"]) > TINY_SIM.duration
+    assert (tmp_path / "run" / "best_genotype_short.npy").exists()
+
+
+def test_replay_and_unseen_use_the_longer_walks() -> None:
+    saved = {"sim": asdict(TINY_SIM), "ea": asdict(EAConfig(final_duration=0.5))}
+    assert final_sim_config(saved).duration == 0.5
+    del saved["ea"]["final_duration"]  # a config from before D21
+    assert final_sim_config(saved).duration == TINY_SIM.duration
