@@ -5,6 +5,7 @@ every construction, so only a flat world makes two runs comparable exactly.
 """
 
 import csv
+import json
 import multiprocessing as mp
 import random
 from collections.abc import Iterator
@@ -238,3 +239,26 @@ def test_a_run_logs_the_gait_terms_and_sigma(tmp_path: Path, pool: Pool) -> None
         assert 0.0 <= float(row["low_body"]) <= 1.0
         assert 0.0 <= float(row["leg_imbalance"]) <= 1.0
         assert config.mutation_sigma <= float(row["sigma"]) <= config.max_sigma
+    # With a one-generation stall limit, some island must have widened sigma.
+    assert any(float(row["sigma"]) > config.mutation_sigma for row in rows)
+
+
+def test_stagnation_rule_needs_a_fixed_fitness() -> None:
+    with pytest.raises(ValueError, match="stall_generations"):
+        check_config(EAConfig(stall_generations=15, curriculum=True))
+    with pytest.raises(ValueError, match="stall_generations"):
+        check_config(EAConfig(stall_generations=15, terrain_mode="per_generation"))
+    check_config(EAConfig(mutation_sigma=0.5))  # max_sigma only matters when on
+
+
+def test_skip_done_reads_configs_from_before_new_settings(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """A run whose config predates a setting still counts as done (D1)."""
+    config = tiny_config("best")
+    run_tiny(config, tmp_path / "run", pool)
+    saved_file = tmp_path / "run" / "config.json"
+    saved = json.loads(saved_file.read_text())
+    del saved["ea"]["stall_generations"], saved["sim"]["vision_rays"]
+    saved_file.write_text(json.dumps(saved))
+    assert finished_with(tmp_path / "run", config, TINY_SIM, "flat")

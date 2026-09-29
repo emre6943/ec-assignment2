@@ -156,6 +156,23 @@ def test_arriving_counts_the_rest_of_the_walk_as_zero(
     assert score.mean_distance == pytest.approx(0.0, abs=1e-6)
 
 
+def test_a_hopeless_walk_keeps_its_distance_for_the_rest(
+    flat_model: mj.MjModel,
+) -> None:
+    """Stopped early as hopeless (D16), the rest of the walk counts where it stopped."""
+    config = SimConfig(duration=1.0, hidden_layers="4", early_stop_time=0.2)
+    score = walk(np.zeros(config.genotype_length), flat_model, config, 10.0)
+    assert score.seconds == pytest.approx(0.2, abs=0.03)
+    assert score.mean_distance == pytest.approx(score.distance, abs=0.01)
+
+
+def test_bad_settings_are_rejected() -> None:
+    with pytest.raises(ValueError, match="carry_height"):
+        SimConfig(carry_height=0.0)
+    with pytest.raises(ValueError, match="unknown ray set"):
+        SimConfig(vision_rays="many")
+
+
 def test_speed_term_prefers_the_faster_of_two_equal_walks() -> None:
     """1 m closed in 10 s beats 1 m closed in 15 s (their final distance is equal)."""
     config = SimConfig(speed_weight=0.5)

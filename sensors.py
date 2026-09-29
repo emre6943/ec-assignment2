@@ -82,10 +82,32 @@ RAY_DIRECTIONS: npt.NDArray[np.float64] = np.array(
 
 N_TASK_INPUTS: int = 2 + 3 + 3  # clock, target, gravity
 
+# Which of the RAYS a brain uses (`SimConfig.vision_rays`, decision D5).
+# "all": the 10 above. "near": straight down plus the four steep (45 degree)
+# rays - on OlympicArena the up ray never fires and the shallow rays mostly
+# measure the arena's edges, not the bumps (experiment 17).
+RAY_SETS: dict[str, tuple[int, ...]] = {
+    "all": tuple(range(len(RAYS))),
+    "near": (0, 6, 7, 8, 9),
+}
 
-def n_inputs(vision: bool, hinges: int = 16) -> int:
+
+def ray_set(name: str) -> tuple[int, ...]:
+    """The indices into RAYS of a named ray set."""
+    if name not in RAY_SETS:
+        msg = f"unknown ray set {name!r}; choose one of {', '.join(RAY_SETS)}"
+        raise ValueError(msg)
+    return RAY_SETS[name]
+
+
+RAY_SET_DIRECTIONS: dict[str, npt.NDArray[np.float64]] = {
+    name: RAY_DIRECTIONS[list(indices)] for name, indices in RAY_SETS.items()
+}
+
+
+def n_inputs(vision: bool, hinges: int = 16, rays: str = "all") -> int:
     """Length of the input vector for a body with `hinges` motors."""
-    return hinges + N_TASK_INPUTS + (len(RAYS) if vision else 0)
+    return hinges + N_TASK_INPUTS + (len(ray_set(rays)) if vision else 0)
 
 
 def hinge_angles(data: mj.MjData) -> FloatArray:
@@ -144,22 +166,27 @@ def vision(
     data: mj.MjData,
     core_id: int,
     ground: tuple[int, ...],
+    rays: str = "all",
 ) -> FloatArray:
-    """The 10 ray distances to the ground (`ground` geoms), scaled to [0, 1].
+    """The ray distances to the ground (`ground` geoms), scaled to [0, 1].
+
+    `rays` names the set of rays to cast (RAY_SETS): all 10, or the 5 "near".
 
     A ray that hits nothing reads 1 (maximum range): always the upward ray
-    while the robot is upright. If the ray origin itself ends up below the
+    (in the "all" set) while the robot is upright. If the ray origin itself ends up below the
     ground - the robot is upside down and pressed into it - every ray reads 0.
     """
     rotation = data.xmat[core_id].reshape(3, 3)  # body axes as columns
     origin = data.xpos[core_id] + rotation @ RAY_ORIGIN
+    ray_set(rays)  # raises ValueError for an unknown ray set
+    chosen = RAY_SET_DIRECTIONS[rays]
     if origin[2] < ground_height(model, data, ground, origin[0], origin[1]):
-        return np.zeros(len(RAYS))
+        return np.zeros(len(chosen))
 
     distances = np.array(
         [
             ray_to_ground(model, data, ground, origin, rotation @ direction)
-            for direction in RAY_DIRECTIONS
+            for direction in chosen
         ]
     )
     distances = np.where(distances < 0.0, RAY_MAX_RANGE, distances)
@@ -178,6 +205,7 @@ def read_inputs(
     target_xy: FloatArray,
     ground: tuple[int, ...] | None,
     clock_hz: float = CLOCK_HZ,
+    rays: str = "all",
 ) -> FloatArray:
     """Assemble the network's input vector (without vision if `ground` is None)."""
     parts = [
@@ -187,5 +215,5 @@ def read_inputs(
         gravity_in_body_frame(data, core_id),
     ]
     if ground is not None:
-        parts.append(vision(model, data, core_id, ground))
+        parts.append(vision(model, data, core_id, ground, rays))
     return np.concatenate(parts)

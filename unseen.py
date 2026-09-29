@@ -3,12 +3,13 @@
     uv run --project ../ariel python unseen.py results/best/seed0 results/none/seed0 ...
 
 Every run evolves on its seed's training terrain. This asks the robustness
-question: does the evolved brain still walk on new ground? The first call
-generates `N_TEST_TERRAINS` plain `RuggedTerrainWorld()` terrains into
-`results/terrains/rugged/test/` (per body for bodies other than spider_16,
-since a saved terrain includes the robot); every later call reuses them, so
-all runs of a body are tested on exactly the same unseen ground. Runs trained
-on another world are skipped: only RuggedTerrainWorld changes between builds.
+question: does the evolved brain still walk on new ground? For each world and
+body, the first call builds `N_TEST_TERRAINS` fresh copies of the run's own
+world (a new random terrain, or a new rugged strip for OlympicArena) into
+`results/terrains/<world>/test/<body>/` (spider_16 on rugged keeps
+`results/terrains/rugged/test/`); every later call reuses them, so all runs
+of a body and world are tested on exactly the same unseen ground. Runs on
+SimpleFlatWorld are skipped: it is the same on every build.
 
 For each run it writes `unseen.json` next to the run's other files:
 
@@ -20,21 +21,37 @@ For each run it writes `unseen.json` next to the run's other files:
 import argparse
 import json
 import multiprocessing as mp
-from dataclasses import asdict, fields
+from dataclasses import asdict
 from pathlib import Path
 
 # Third-party libraries
 import numpy as np
 
 # Local libraries (ARIEL)
-from ariel.simulation.environments import RuggedTerrainWorld
+from ariel.simulation.environments import RuggedTerrainWorld, SimpleFlatWorld
 
 # Local libraries
 from bodies import FIRST_BODY
-from simulate import Score, SimConfig, evaluate_task, fitness, run_terrains
+from run import WORLDS
+from simulate import (
+    Score,
+    SimConfig,
+    evaluate_task,
+    fitness,
+    run_terrains,
+    saved_sim_config,
+)
 
-TEST_TERRAIN_DIR = Path(__file__).parent / "results" / "terrains" / "rugged" / "test"
+TERRAIN_DIR = Path(__file__).parent / "results" / "terrains"
 N_TEST_TERRAINS = 20
+
+
+def test_terrain_dir(world: str, body: str) -> Path:
+    """Where the unseen terrains of one world (a WORLDS key) and body live."""
+    folder = TERRAIN_DIR / world / "test"
+    if world == "rugged" and body == FIRST_BODY:
+        return folder  # where experiments 7-12 keep theirs
+    return folder / body
 
 
 def load_sim_config(run: Path) -> SimConfig | None:
@@ -42,11 +59,10 @@ def load_sim_config(run: Path) -> SimConfig | None:
     config_file = run / "config.json"
     if not config_file.exists():
         return None
-    saved = json.loads(config_file.read_text())["sim"]
-    known = {field.name for field in fields(SimConfig)}
-    if set(saved) - known:
+    try:
+        return saved_sim_config(json.loads(config_file.read_text())["sim"])
+    except (KeyError, ValueError):
         return None
-    return SimConfig(**saved)
 
 
 def summarise(scores: list[Score], config: SimConfig) -> dict[str, object]:
@@ -79,23 +95,31 @@ def main() -> None:
                 continue
             genotype = np.load(run / "best_genotype.npy").tolist()
             saved = json.loads((run / "config.json").read_text())
-            if saved.get("world", RuggedTerrainWorld.__name__) != (
-                RuggedTerrainWorld.__name__
-            ):
-                # The test terrains are fresh RuggedTerrainWorld builds, so they
-                # are only "unseen versions of the training world" for rugged runs.
-                print(f"{run}: skipped (trained on {saved['world']}, not rugged)")
+            world_class = saved.get("world", RuggedTerrainWorld.__name__)
+            if world_class == SimpleFlatWorld.__name__:
+                print(f"{run}: skipped (flat ground is the same on every build)")
+                continue
+            world = next(
+                (
+                    key
+                    for key, factory in WORLDS.items()
+                    if factory.__name__ == world_class
+                ),
+                None,
+            )
+            if world is None:
+                print(f"{run}: skipped (unknown world {world_class})")
                 continue
             training = saved["terrains"]
             if not training:
                 print(f"{run}: skipped (no fixed training terrain: per_generation run)")
                 continue
 
-            test_dir = TEST_TERRAIN_DIR
-            if config.body != FIRST_BODY:
-                test_dir = TEST_TERRAIN_DIR / config.body
             test_terrains = run_terrains(
-                test_dir, N_TEST_TERRAINS, RuggedTerrainWorld, config.body
+                test_terrain_dir(world, config.body),
+                N_TEST_TERRAINS,
+                WORLDS[world],
+                config.body,
             )
             tasks = [(genotype, (path,), config, None) for path in training]
             tasks += [(genotype, (path,), config, None) for path in test_terrains]

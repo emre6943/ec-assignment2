@@ -180,7 +180,7 @@ to `results/<condition>/`, where experiment 8's results live.
     uv run --project ../ariel python replay.py results/olympic/best/seed0        # its best walk (video)
     uv run --project ../ariel python replay.py results/olympic/best/seed0 --viewer  # live 3D window
     uv run --project ../ariel python compare.py results/olympic/best/seed0 results/olympic/none/seed0
-    uv run --project ../ariel python unseen.py results/best/seed*   # robustness test (rugged runs only)
+    uv run --project ../ariel python unseen.py results/olympic/best/seed*  # robustness: 20 fresh arenas
     uv run --project ../ariel python analyze.py results/olympic/{best,worst,random,none,standard,random_search} \
         --threshold 0.8 --reference none --out results/olympic/analysis         # report figure + stats
 

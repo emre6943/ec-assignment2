@@ -156,8 +156,17 @@ def check_config(config: "EAConfig") -> None:
         problems.append("migration_interval must be at least 1")
     if config.stall_generations < 0:
         problems.append("stall_generations must be 0 (off) or more")
-    if config.max_sigma < config.mutation_sigma:
-        problems.append("max_sigma must be at least mutation_sigma")
+    if config.stall_generations > 0:
+        if config.max_sigma < config.mutation_sigma:
+            problems.append("max_sigma must be at least mutation_sigma")
+        # The rule compares an island's best across generations, which needs a
+        # fitness that means the same every generation (D19).
+        if config.curriculum or config.early_stop:
+            problems.append(
+                "stall_generations cannot be combined with a curriculum or early stop"
+            )
+        if config.terrain_mode != "per_run":
+            problems.append("stall_generations needs terrain_mode per_run")
     if problems:
         raise ValueError("; ".join(problems))
 
@@ -309,6 +318,8 @@ class Experiment:
         The island's elites are always kept, so a wider step cannot lose the
         best gait found so far; it only makes the children search further away.
         """
+        if self.config.algorithm == "random_search":
+            return  # random search never mutates
         improved = best < self.island_best[island]
         self.island_best[island] = min(best, self.island_best[island])
         self.island_sigma[island], self.island_stall[island] = next_sigma(

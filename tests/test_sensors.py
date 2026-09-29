@@ -76,3 +76,18 @@ def test_rays_turn_with_the_body(flat: tuple[mj.MjModel, mj.MjData]) -> None:
     level = read(model, data)
     data.qpos[3:7] = [np.cos(np.pi / 4), 0.0, 0.0, np.sin(np.pi / 4)]
     np.testing.assert_allclose(read(model, data), level, atol=1e-6)
+
+
+def test_near_rays_are_down_plus_the_four_steep_ones(
+    flat: tuple[mj.MjModel, mj.MjData],
+) -> None:
+    model, data = flat
+    mj.mj_resetData(model, data)
+    mj.mj_forward(model, data)
+    core = model.body(CORE_BODY).id
+    every = vision(model, data, core, ground_geoms(model))
+    near = vision(model, data, core, ground_geoms(model), rays="near")
+    np.testing.assert_array_equal(near, every[[DOWN, 6, 7, 8, 9]])
+    assert n_inputs(vision=True, hinges=8, rays="near") == 8 + 8 + 5
+    with pytest.raises(ValueError, match="unknown ray set"):
+        n_inputs(vision=True, rays="many")

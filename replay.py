@@ -6,9 +6,9 @@
     uv run --project ../ariel python replay.py results/best/seed0 --flat         # flat ground
 
 By default the robot walks the terrain it was evolved on (saved with the run).
-`--new-terrain` builds its world anew - for RuggedTerrainWorld a random
-terrain it never saw, the robustness test; OlympicArena is the same every
-time - and `--flat` uses ARIEL's flat world. The video lands in the
+`--new-terrain` builds its world anew - a random terrain (RuggedTerrainWorld)
+or rugged strip (OlympicArena) it never saw, the robustness test - and
+`--flat` uses ARIEL's flat world. The video lands in the
 run's folder as `replay*.mp4`, and the final distance to the target is printed.
 
 The controller is driven through MuJoCo's control callback here (the viewer
@@ -29,7 +29,7 @@ import numpy as np
 from mujoco import viewer
 
 # Local libraries (ARIEL)
-from ariel.simulation.environments import SimpleFlatWorld
+from ariel.simulation.environments import RuggedTerrainWorld, SimpleFlatWorld
 from ariel.utils.renderers import video_renderer
 from ariel.utils.video_recorder import VideoRecorder
 
@@ -38,7 +38,7 @@ from genome import split
 from network import Genotype, forward
 from run import WORLDS
 from sensors import CORE_BODY, HALF_PI, read_inputs
-from simulate import TARGET_XY, SimConfig, build_model
+from simulate import TARGET_XY, SimConfig, build_model, saved_sim_config
 from terrain import ground_geoms
 
 
@@ -56,7 +56,9 @@ def make_controller(
     def control(m: mj.MjModel, d: mj.MjData) -> None:
         step = round(d.time / m.opt.timestep)
         if step % config.control_every == 0:
-            inputs = read_inputs(m, d, core_id, TARGET_XY, ground, clock_hz)
+            inputs = read_inputs(
+                m, d, core_id, TARGET_XY, ground, clock_hz, config.vision_rays
+            )
             d.ctrl[:] = forward(weights, shape, inputs) * HALF_PI
 
     return control
@@ -73,14 +75,15 @@ def main() -> None:
     args = parser.parse_args()
 
     run_config = json.loads((args.run / "config.json").read_text())
-    config = SimConfig(**run_config["sim"])
+    config = saved_sim_config(run_config["sim"])
     genotype = np.load(args.run / "best_genotype.npy")
     training_terrains = run_config.get("terrains", [])
     if args.flat:
         model = build_model(SimpleFlatWorld, config.body)
     elif args.new_terrain or not training_terrains:
         worlds = {factory.__name__: factory for factory in WORLDS.values()}
-        model = build_model(worlds[run_config["world"]], config.body)
+        world = run_config.get("world", RuggedTerrainWorld.__name__)
+        model = build_model(worlds[world], config.body)
     else:
         model = mj.MjModel.from_binary_path(training_terrains[0])
     data = mj.MjData(model)

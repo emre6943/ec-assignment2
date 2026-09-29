@@ -95,7 +95,8 @@ def test_unseen_skips_runs_it_cannot_read(tmp_path: Path) -> None:
     (tmp_path / "config.json").write_text(json.dumps({"sim": {"n_hidden": 8}}))
     assert load_sim_config(tmp_path) is None  # an older, incompatible version
     (tmp_path / "config.json").write_text(json.dumps({"sim": {"duration": 3.0}}))
-    assert load_sim_config(tmp_path) == SimConfig(duration=3.0)
+    # A config that does not record its body is from experiments 1-12: spider_16.
+    assert load_sim_config(tmp_path) == SimConfig(duration=3.0, body="spider_16")
 
 
 def test_unseen_summary_statistics() -> None:

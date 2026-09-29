@@ -35,7 +35,7 @@ individuals would no longer be compared fairly (D10).
 # Standard library
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 # Third-party libraries
@@ -48,10 +48,10 @@ from ariel.simulation.environments import BaseWorld, RuggedTerrainWorld
 from ariel.simulation.tasks.targeted_locomotion import distance_to_target
 
 # Local libraries
-from bodies import DEFAULT_BODY, body_info, build_body
+from bodies import DEFAULT_BODY, FIRST_BODY, body_info, build_body
 from genome import genotype_length, split
 from network import Genotype, NetworkShape, forward, parse_hidden
-from sensors import CORE_BODY, HALF_PI, n_inputs, read_inputs
+from sensors import CORE_BODY, HALF_PI, n_inputs, ray_set, read_inputs
 from terrain import CORE_ABOVE_LOWEST_POINT, ground_geoms, ground_height, spawn_height
 
 SPAWN_XY: tuple[float, float] = (0.0, 0.0)
@@ -73,7 +73,8 @@ class SimConfig:
 
     duration: float = 15.0  # seconds of simulated time per episode (D12)
     control_every: int = 10  # physics steps per network update (10 x 2 ms = 50 Hz)
-    vision: bool = True  # the 10 terrain-sensing rays as extra inputs
+    vision: bool = True  # the terrain-sensing rays as extra inputs
+    vision_rays: str = "all"  # which rays: "all" 10 or the 5 "near" ones (D5)
     hidden_layers: str = "16"  # neurons per hidden layer, e.g. "16" or "8,8" (D6)
     body: str = DEFAULT_BODY  # a John Set body (bodies.BODIES, decision D1)
     evolve_tempo: bool = False  # a tempo gene sets the clock (genome.py, D17)
@@ -89,6 +90,13 @@ class SimConfig:
     stop_at_target: bool = False  # end the walk once the target is reached
     early_stop_time: float = 5.0  # when a hopeless walk is judged (if enabled)
 
+    def __post_init__(self) -> None:
+        """Reject settings that would only fail, or divide by zero, mid-run."""
+        ray_set(self.vision_rays)  # raises ValueError for an unknown ray set
+        if self.carry_height <= 0:
+            msg = f"carry_height must be positive, got {self.carry_height}"
+            raise ValueError(msg)
+
     @property
     def hinges(self) -> int:
         """Motors of the body: the network's outputs."""
@@ -103,7 +111,7 @@ class SimConfig:
     def shape(self) -> NetworkShape:
         """The network shape, hence the genotype length."""
         return NetworkShape(
-            n_inputs(self.vision, self.hinges),
+            n_inputs(self.vision, self.hinges, self.vision_rays),
             parse_hidden(self.hidden_layers),
             self.hinges,
         )
@@ -149,7 +157,33 @@ class Score:
     work_imbalance: float = 0.0  # 0 = every leg's motors work equally, 1 = one idle
 
 
-FAILED_SCORE = Score(FAILED_FITNESS, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, FAILED_FITNESS, 1.0)
+FAILED_SCORE = Score(
+    distance=FAILED_FITNESS,
+    displacement=0.0,
+    ground_contact=1.0,
+    upside_down=1.0,
+    seconds=0.0,
+    low_body=1.0,
+    leg_imbalance=1.0,
+    mean_distance=FAILED_FITNESS,
+    work_imbalance=1.0,
+)
+
+
+def saved_sim_config(saved: dict[str, object]) -> SimConfig:
+    """A run's SimConfig from the "sim" entry of its config.json.
+
+    A setting a run's config does not record did not exist yet, so the run
+    used what is now that setting's default - except the body, whose default
+    changed from spider_16 (experiments 1-12, which do not record it) to
+    spider_8. Raises ValueError for a setting this version does not know
+    (a config from an older, incompatible version).
+    """
+    unknown = set(saved) - {field.name for field in fields(SimConfig)}
+    if unknown:
+        msg = f"unknown settings {sorted(unknown)}: an older, incompatible config"
+        raise ValueError(msg)
+    return SimConfig(**{"body": FIRST_BODY, **saved})
 
 
 def fitness(score: Score, config: SimConfig, movement_weight: float = 0.0) -> float:
@@ -189,7 +223,9 @@ def shortfall_of_least(per_leg: npt.NDArray[np.float64]) -> float:
     """1 - (smallest leg's amount) / (mean over legs), in [0, 1].
 
     0 when every leg has the same amount, 1 when one leg has none. Fewer than
-    two legs, or nothing at all, scores 0.
+    two legs, or (numerically) nothing at all, scores 0. The ratio ignores
+    scale: even a robot that only settles after spawning has some movement
+    and work per leg, and is scored on how evenly that is spread.
     """
     if len(per_leg) < 2 or per_leg.mean() < 1e-9:
         return 0.0
@@ -320,7 +356,9 @@ def walk(
         angles.append(data.qpos[7:].copy())
         power = data.actuator_force * data.qvel[6 : 6 + model.nu]
         hinge_work += np.maximum(power, 0.0) * update_period
-        inputs = read_inputs(model, data, core_id, TARGET_XY, vision_ground, clock_hz)
+        inputs = read_inputs(
+            model, data, core_id, TARGET_XY, vision_ground, clock_hz, config.vision_rays
+        )
         data.ctrl[:] = forward(weights, shape, inputs) * HALF_PI
         mj.mj_step2(model, data)
         mj.mj_step(model, data, nstep=config.control_every - 1)

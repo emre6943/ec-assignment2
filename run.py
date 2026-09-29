@@ -23,7 +23,7 @@ import argparse
 import json
 import multiprocessing as mp
 import random
-from dataclasses import asdict, fields, replace
+from dataclasses import fields, replace
 from pathlib import Path
 
 # Third-party libraries
@@ -44,14 +44,15 @@ from ariel.simulation.environments import (
 from bodies import BODIES, FIRST_BODY
 from ea import EAConfig, Experiment
 from migration import POLICIES
-from simulate import SimConfig
+from simulate import SimConfig, saved_sim_config
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
 # Every world is ARIEL's, used with its default settings. "olympic"
 # (OlympicArena: a flat start, then a gentle rugged strip with the target) is
 # the final world (decision D2); "rugged" was the world of experiments 1-12.
-# Only RuggedTerrainWorld draws a new random terrain on every build.
+# RuggedTerrainWorld and OlympicArena's rugged strip are random on every
+# build, so each seed's world is built once and saved (D10).
 WORLDS = {
     "rugged": RuggedTerrainWorld,
     "flat": SimpleFlatWorld,
@@ -165,9 +166,15 @@ def finished_with(
     if not (out / "summary.json").exists() or not (out / "config.json").exists():
         return False
     saved = json.loads((out / "config.json").read_text())
+    try:
+        # Settings a run did not record get the values it ran with (D1, D12).
+        saved_ea = EAConfig(**saved["ea"])
+        saved_sim = saved_sim_config(saved["sim"])
+    except (KeyError, TypeError, ValueError):
+        return False
     return (
-        saved.get("ea") == asdict(ea_config)
-        and saved.get("sim") == asdict(sim_config)
+        saved_ea == ea_config
+        and saved_sim == sim_config
         and saved.get("world") == WORLDS[world].__name__
     )
 

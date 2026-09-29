@@ -319,6 +319,21 @@ stick out.
 These readings are checked by `tests/test_sensors.py` on ARIEL's flat world, where the
 correct distances are known exactly.
 
+**Fewer rays? (experiment 18, 2026-09-29).** Over experiment 17's best walk on
+OlympicArena, the up ray always read its maximum (the robot never flipped), and the four
+15° rays swung between about 0.8 and 3 m, mostly measuring the 2 m wide arena's edges and
+the body's turning. The down ray (body height, ±1 cm) and the four 45° rays (the ground
+just ahead, 2-7 cm variation over the bumps) carried the terrain information. The 10
+rays cost 160 of the 568 weights. `--vision-rays near` keeps only the down ray and the
+four 45° rays: 21 inputs and 488 weights for spider_8. The default stays `all`, so
+earlier runs reproduce.
+
+Result (one seed): with 5 rays and clock boost 3 the robot ended 1.05 m from the target,
+against 0.53 m with 10 rays; with 5 rays and boost 1 it ended 0.53 m away and stood
+clearly taller (see D17). A 0.5 m gap from the ray count alone mostly shows how noisy a
+single-seed pilot is; the posture differences between the boost settings are large and
+consistent, the distance differences are not.
+
 ## D6. Network shape — ✅ one hidden layer of 16, chosen by a pilot
 
 **Weights only, or topology too?** There are two families of neuroevolution:
@@ -610,10 +625,11 @@ conditions × 5 seeds in about 7 h; the standard EA was added later as a sixth).
 ## D14. Final evaluation — 🟡 re-test on unseen terrains
 
 **For OlympicArena (experiment 14):** its rugged strip is random on every build (D2), so
-the same test applies: re-test each best controller on fresh arenas. `unseen.py` still
-builds RuggedTerrainWorld test terrains only and skips other worlds; it gets the world
-from each run's `config.json` once experiment 14 has finished (code is not changed while
-experiments run). What follows describes the rugged runs (experiments 7-12).
+the same test applies. `unseen.py` builds 20 fresh copies of each run's own world
+(`results/terrains/<world>/test/<body>/`) and skips only SimpleFlatWorld, which never
+changes. First result: experiment 18's best brain ends 0.53 m from the target on its own
+arena and 1.24 ± 0.30 m on 20 fresh ones - it specialises to its strip, as the rugged
+brains did. What follows describes the rugged runs (experiments 7-12).
 
 The fitness logged during a run comes from the seed's training terrain. For the headline
 numbers, also take each run's final best controller and evaluate it on **20 fresh terrains
@@ -779,6 +795,15 @@ to discover rhythm before it can improve a gait.
   produce the movement themselves. Here a single shared beat is only an input; the
   network decides every joint's movement. If the TA disagrees, `--evolve-tempo` is simply
   left off (the clock is then a fixed 1 Hz).
+
+**Clock boost 3 or 1? (experiment 18, 2026-09-29).** With the gait terms on, the
+boost-3 brains held their front and back legs folded: those outputs sat pinned at ±90°
+50-61% of the walk, a third of all outputs overall, so only the side legs rowed. With
+boost 1 (and 5 rays) the pinned share fell to 26%, the body rode 4.7 cm up instead of
+3.1 cm (under 2 cm only 4% of the time, against 22%), and the robot got as far (0.53 m
+from the target). One joint, the back leg's outer hinge, still sat folded (+86°, 92% of
+the walk). Boost 3 mostly added saturation: it doubles what the network asks of the
+joints, which the weak servos cannot follow anyway (see above).
 
 **Worlds made of several pieces.** Most ARIEL worlds have one ground geom, named `floor`.
 OlympicArena is built from a flat start box (named `floor`), an unnamed rugged heightfield
