@@ -3,9 +3,16 @@
 Brain evolution (neuroevolution) for X_400111 at the VU. Team of 4, worth 10 points.
 **Deadline Tuesday 13 October 2026, 09:00 CEST.** Each day late costs 0,5 points.
 
-Assignment 1 evolved a body. This one takes a fixed body (`spider_16`) and evolves the
-weights of its neural-network controller, so that it walks towards a target on rugged
-terrain. Our research question compares **island-model migration policies**.
+Assignment 1 evolved a body. This one takes a fixed body and evolves the weights of its
+neural-network controller, so that it walks towards a target. Our research question
+compares **island-model migration policies**.
+
+**Where we are (2026-09-29):** experiments 1-12 used `spider_16` on `RuggedTerrainWorld`.
+spider_16 turned out to be too weak to lift its own body, so it only shuffles. The team
+switched to **`spider_8`** (decision D17). The world is being re-decided with experiment
+13 (flat / OlympicArena / rugged), and the research-question experiment will then be
+re-run on the final body and world. The code's default body is still `spider_16`, so the
+earlier experiments reproduce; pass `--body spider_8` for the new setup.
 
 **New here? Read in this order:**
 
@@ -44,20 +51,28 @@ Then run everything from inside `assignment2/` as `uv run --project ../ariel pyt
 
 ## What the code does
 
-**The robot:** `spider_16` from ARIEL's John Set, 4 legs × 4 hinges = 16 motors. It spawns
-on ARIEL's `RuggedTerrainWorld` and has 10 seconds to walk towards a target 2 m away.
+**The robot:** a body from ARIEL's John Set (`--body`): `spider_16` (4 legs × 4 hinges =
+16 motors, the default) or `spider_8` (4 legs × 2 hinges = 8 motors). It spawns in an ARIEL
+world (`--world`, default `rugged` = `RuggedTerrainWorld`) and has 10 seconds to walk
+towards a target 2 m away.
 
-**The brain:** a feed-forward neural network.
+**The brain:** a feed-forward neural network. Numbers below are for spider_16, then
+spider_8:
 
-- **34 inputs:**
-  - 16 joint angles;
-  - a clock (sin/cos at 1 Hz);
+- **34 / 26 inputs:**
+  - one joint angle per hinge (16 / 8);
+  - a clock (sin/cos at 1 Hz, or at an evolved tempo with `--evolve-tempo`);
   - where the target is relative to the robot's heading (3 values);
   - how the body is tilted (3 values);
   - 10 "vision" rays that measure the distance to the ground around it.
 - **One hidden layer of 16 neurons.**
-- **16 outputs:** one target angle per hinge.
-- The genotype is simply all 832 weights in one list.
+- **16 / 8 outputs:** one target angle per hinge.
+- The genotype is simply all the weights in one list: 832 / 568 of them, plus one tempo
+  gene with `--evolve-tempo`.
+
+**Rhythm options** (decision D17, off by default): `--clock-boost 3` makes new random
+networks respond 3× more strongly to the clock, so they start with a clear rhythm;
+`--evolve-tempo` adds a gene that sets the clock's frequency (0.25-4 Hz).
 
 **The fitness** (lower is better):
 
@@ -78,23 +93,28 @@ Standing still scores 2.0.
    `worst`, `random` ones, or `none` (no migration, the control).
 
 `random_search` is the baseline: the same loop, but children are random networks.
+`run.py --standard` runs the same EA as **one population** (1 × 80, 8 elites, no
+migration), a standard EA to compare the island model against (experiment 9).
 
 **The terrain:** each seed gets one random rugged terrain, generated on its first use and
-saved in `results/terrains/rugged/seed<S>/`. Every condition with that seed walks exactly
-the same ground, which makes the comparison between policies fair.
+saved in `results/terrains/rugged/seed<S>/` (`results/terrains/<world>/<body>/seed<S>/` for
+other bodies and worlds). Every condition with that seed walks exactly the same ground,
+which makes the comparison between policies fair.
 
 ## Code map
 
 | File | What it holds |
 |---|---|
-| `run.py` | **Start here.** Command line: one condition, one or more seeds |
+| `run.py` | **Start here.** Command line: one condition, one or more seeds (`--standard` for no islands) |
+| `bodies.py` | The John Set bodies we can use (`--body`), and their hinge count and leg reach |
+| `genome.py` | The genotype: the network's weights plus the optional tempo gene; the rhythm options |
 | `ea.py` | The island-model EA as `ariel.ec` operations: reproduce, evaluate, migrate, log |
 | `migration.py` | Emigrant selection (best / worst / random / none) and the ring migration |
 | `operators.py` | Neuron-level crossover and tournament selection (mutation is ARIEL's own) |
 | `network.py` | The neural network, and how a flat genotype maps onto its weights |
-| `sensors.py` | The 34 network inputs, including the 10 vision rays |
+| `sensors.py` | The network inputs, including the 10 vision rays |
 | `simulate.py` | One evaluation: walk the terrain, measure, compute the fitness |
-| `terrain.py` | A spawn height that clears the rugged ground (the template's spawn buries the robot) |
+| `terrain.py` | What counts as ground in each world, and a spawn height that clears it (the template's spawn buries the robot) |
 | `plot.py` | Curves of one run: fitness, per-island best, posture, genetic diversity |
 | `replay.py` | Watch a run's best network walk, as a video or in a live viewer |
 | `compare.py` | Overlay a few runs on the plain distance, by evaluations and by wall-clock time |
@@ -121,15 +141,23 @@ the same ground, which makes the comparison between policies fair.
 - **Cost:** a default run (12,000 evaluations) takes about 17 minutes on a 10-core Mac.
   `run.py` uses 10 worker processes; on a smaller machine pass `--workers 4` (or your
   core count). Run experiments **one after another**: two at once just makes each slower.
-- **The full experiment** for the report is `experiments/08_main_experiment.sh`: 5
-  conditions × 5 seeds, about 7 hours, so run it overnight.
+- **The full experiment** for the report is `experiments/08_main_experiment.sh`: 6
+  conditions (4 migration policies, the standard EA, random search) × 5 seeds, about 7
+  hours, so run it overnight. It passes `--skip-done`, which skips any run already
+  finished with exactly the same settings, so an interrupted night can be resumed.
+- **Useful flags:**
+  - `--body spider_8`: another John Set body;
+  - `--world rugged|flat|olympic|amphitheatre|crater`: another ARIEL world;
+  - `--clock-boost 3 --evolve-tempo`: the rhythm options (D17);
+  - `--standard`: one population of 80 instead of 4 islands of 20;
+  - `--skip-done`: skip seeds that are already finished with the same settings;
+  - `--duration 15`: longer walks (seconds).
 - **Terrain files are per machine.** `results/` is not in git, so the same seed gives a
   *different* terrain on your laptop than on someone else's. For the final results, one
   person runs everything on one machine, or shares their `results/terrains/` folder.
 - **Options we tried and rejected** stay available for experimenting:
   - `--curriculum`, `--early-stop` and `--stop-at-target` (decision D16);
-  - `--terrain-mode per_generation` (D10);
-  - `--world flat`, a debug world only.
+  - `--terrain-mode per_generation` (D10).
 
   See `experiments/README.md` for what they did.
 
@@ -141,7 +169,7 @@ the same ground, which makes the comparison between policies fair.
     uv run --project ../ariel python compare.py results/best/seed0 results/none/seed0
     uv run --project ../ariel python unseen.py results/best/seed*                # robustness test
     uv run --project ../ariel python analyze.py results/best results/worst results/random \
-        results/none results/random_search                                       # report figure + stats
+        results/none results/standard results/random_search --reference none     # report figure + stats
 
 `analyze.py` writes `results/analysis/`:
 
@@ -150,7 +178,8 @@ the same ground, which makes the comparison between policies fair.
   budget, evaluations to reach a threshold, the area under the curve and (after
   `unseen.py`) the distance on unseen terrain;
 - `stats.md`: a Friedman test across all conditions (blocked by seed), and Mann-Whitney
-  U tests of each condition against `none`, Holm-corrected (decision D3 explains why).
+  U tests of each condition against `--reference` (default `none`), Holm-corrected
+  (decision D3 explains why). Pass `--out` to write somewhere else than `results/analysis/`.
 
 ## Rules we follow
 
@@ -175,9 +204,10 @@ Investigate **one aspect of the EA** as a research question.
 
 **Fixed for the whole assignment:**
 
-- **Body:** a free choice from `ariel...prebuilt_robots.john_set`. We chose `spider_16`.
+- **Body:** a free choice from `ariel...prebuilt_robots.john_set`. We chose `spider_16`,
+  then switched to `spider_8` (D1, D17).
 - **World:** a free choice from `ariel.simulation.environments`, except
-  `SimpleTiltedWorld`. We chose `RuggedTerrainWorld`.
+  `SimpleTiltedWorld`. So far `RuggedTerrainWorld`; being re-decided (D17).
 - **Controller:** a neural network whose weights are evolved. **No CPGs.**
 
 **The spec's fitness** is the flat-ground distance from the core to the target, lower is

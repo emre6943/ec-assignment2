@@ -56,8 +56,9 @@ CONDITION_COLOURS = {
     "random": "#1baf7a",
     "none": "#eda100",
     "random_search": "#52514e",
+    "standard": "#e87ba4",
 }
-FALLBACK_COLOURS = ("#e87ba4", "#4a3aa7", "#008300")
+FALLBACK_COLOURS = ("#4a3aa7", "#008300", "#e34948")
 TEXT = "#0b0b0b"
 MUTED = "#52514e"
 GRID = "#e4e3df"

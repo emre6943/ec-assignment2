@@ -17,6 +17,7 @@ from simulate import (
     run_terrains,
     walk,
 )
+from terrain import ground_geoms
 
 CONFIG = SimConfig(duration=2.0)
 
@@ -57,17 +58,17 @@ def test_hopeless_walk_is_stopped_early(flat_model: mj.MjModel) -> None:
 def test_ground_contact_is_detected_only_when_touching(flat_model: mj.MjModel) -> None:
     data = mj.MjData(flat_model)
     core = flat_model.geom(CORE_BODY).id
-    floor = flat_model.geom("floor").id
+    ground = ground_geoms(flat_model)
 
     mj.mj_resetData(flat_model, data)
     data.qpos[2] = 1.0  # hold the robot a metre up
     mj.mj_forward(flat_model, data)
-    assert not core_touches_ground(data, core, floor)
+    assert not core_touches_ground(data, core, ground)
 
     mj.mj_resetData(flat_model, data)
     while data.time < 1.0:  # let it drop and settle
         mj.mj_step(flat_model, data)
-    assert core_touches_ground(data, core, floor)
+    assert core_touches_ground(data, core, ground)
 
 
 def test_upside_down_is_detected(flat_model: mj.MjModel) -> None:

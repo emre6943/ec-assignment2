@@ -33,9 +33,11 @@ from ariel.utils.renderers import video_renderer
 from ariel.utils.video_recorder import VideoRecorder
 
 # Local libraries
+from genome import split
 from network import Genotype, forward
 from sensors import CORE_BODY, HALF_PI, read_inputs
 from simulate import TARGET_XY, SimConfig, build_model
+from terrain import ground_geoms
 
 
 def make_controller(
@@ -45,14 +47,15 @@ def make_controller(
 ) -> Callable[[mj.MjModel, mj.MjData], None]:
     """A MuJoCo control callback that runs the network every `control_every` steps."""
     shape = config.shape
+    weights, clock_hz = split(genotype, shape, config.evolve_tempo)
     core_id = model.body(CORE_BODY).id
-    floor_id = model.geom("floor").id if config.vision else None
+    ground = ground_geoms(model) if config.vision else None
 
     def control(m: mj.MjModel, d: mj.MjData) -> None:
         step = round(d.time / m.opt.timestep)
         if step % config.control_every == 0:
-            inputs = read_inputs(m, d, core_id, TARGET_XY, floor_id)
-            d.ctrl[:] = forward(genotype, shape, inputs) * HALF_PI
+            inputs = read_inputs(m, d, core_id, TARGET_XY, ground, clock_hz)
+            d.ctrl[:] = forward(weights, shape, inputs) * HALF_PI
 
     return control
 
@@ -72,9 +75,9 @@ def main() -> None:
     genotype = np.load(args.run / "best_genotype.npy")
     training_terrains = run_config.get("terrains", [])
     if args.flat:
-        model = build_model(SimpleFlatWorld)
+        model = build_model(SimpleFlatWorld, config.body)
     elif args.new_terrain or not training_terrains:
-        model = build_model(RuggedTerrainWorld)
+        model = build_model(RuggedTerrainWorld, config.body)
     else:
         model = mj.MjModel.from_binary_path(training_terrains[0])
     data = mj.MjData(model)

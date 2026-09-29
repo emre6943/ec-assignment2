@@ -1,10 +1,17 @@
-"""Where to spawn the robot on rugged terrain.
+"""The ground of a world, and where to spawn the robot on it.
 
-The world itself is ARIEL's `RuggedTerrainWorld()`, used exactly as shipped:
-default settings, a new random terrain every time it is constructed. Nothing
-in ARIEL is changed or re-implemented here.
+The worlds are ARIEL's, used exactly as shipped with their default settings;
+nothing in ARIEL is changed or re-implemented here. This file only reads the
+compiled world.
 
-The problem this file solves: the template spawns the robot at z = 0.1 with
+**The ground.** Most worlds have one ground geom, the heightfield or plane
+called `floor`. ARIEL's OlympicArena is built from several pieces instead: a
+flat start, a rugged heightfield strip (where the target lies), an incline and
+a finish. `ground_geoms()` therefore collects every geom that is fixed to the
+world and can collide. Vision, the ground-contact penalty and the spawn height
+all use that set, so every world is handled the same way.
+
+**The spawn.** The template spawns the robot at z = 0.1 with
 `correct_collision_with_floor=True`, which lifts the robot so its lowest point
 sits just above z = 0. It ignores the terrain. The rugged ground under the
 spawn point is typically 0.1-0.5 m higher, so the robot starts INSIDE the
@@ -20,26 +27,95 @@ template's `SPAWN_POS`); `world.spawn()` is called through its normal API.
 import mujoco as mj
 import numpy as np
 
-# spider_16 geometry, measured on flat ground.
-CORE_ABOVE_LOWEST_POINT: float = 0.075  # core origin above the robot's lowest point
-LEG_SPAN_RADIUS: float = 0.70  # leg tips reach about 0.64 m from the core
+# The core cube's centre sits this far above the robot's lowest point at rest
+# (true for every John Set body except iguana, whose core ARIEL places 1.6 cm
+# higher; it still spawns about 4 mm clear of the ground).
+CORE_ABOVE_LOWEST_POINT: float = 0.075
+REACH_MARGIN: float = 0.06  # beyond the outermost module centre
 SPAWN_CLEARANCE: float = 0.02  # gap between the robot and the highest ground under it
+RAY_START_Z: float = 100.0  # vertical rays for the ground height start this high
 
 
-def ground_height(model: mj.MjModel, x: float, y: float) -> float:
-    """Terrain height at world (x, y), interpolated from the heightfield.
+def ground_geoms(model: mj.MjModel) -> tuple[int, ...]:
+    """Every geom fixed to the world that can collide: the world's ground.
 
-    Used only to choose the spawn height - never as a controller input, since
-    a real robot would not have a map of the ground.
+    The robot's geoms move with it (they are not welded to the world), so they
+    are never included. Purely visual geoms cannot collide and are skipped.
     """
-    if model.nhfield == 0:
-        return 0.0
-    size_x, size_y, size_z, _ = model.hfield_size[0]
-    n_rows, n_cols = int(model.hfield_nrow[0]), int(model.hfield_ncol[0])
-    heights = model.hfield_data[: n_rows * n_cols].reshape(n_rows, n_cols)
+    return tuple(
+        geom
+        for geom in range(model.ngeom)
+        if model.body_weldid[model.geom_bodyid[geom]] == 0
+        and (model.geom_contype[geom] or model.geom_conaffinity[geom])
+    )
 
-    col = (x + size_x) / (2 * size_x) * (n_cols - 1)
-    row = (y + size_y) / (2 * size_y) * (n_rows - 1)
+
+def ray_to_geom(
+    model: mj.MjModel,
+    data: mj.MjData,
+    geom: int,
+    origin: np.ndarray,
+    direction: np.ndarray,
+) -> float:
+    """Distance along a ray (unit `direction`) to one geom; -1 if it misses."""
+    kind = model.geom_type[geom]
+    if kind == mj.mjtGeom.mjGEOM_HFIELD:
+        return float(mj.mj_rayHfield(model, data, geom, origin, direction, None))
+    if kind == mj.mjtGeom.mjGEOM_MESH:
+        return float(mj.mj_rayMesh(model, data, geom, origin, direction, None))
+    if kind == mj.mjtGeom.mjGEOM_PLANE:
+        # A level plane, taken as unbounded: intersect with z = its height.
+        if direction[2] > -1e-9:
+            return -1.0
+        return float((origin[2] - data.geom_xpos[geom, 2]) / -direction[2])
+    return float(
+        mj.mju_rayGeom(
+            data.geom_xpos[geom],
+            data.geom_xmat[geom],
+            model.geom_size[geom],
+            origin,
+            direction,
+            kind,
+            None,
+        )
+    )
+
+
+def ray_to_ground(
+    model: mj.MjModel,
+    data: mj.MjData,
+    ground: tuple[int, ...],
+    origin: np.ndarray,
+    direction: np.ndarray,
+) -> float:
+    """Distance along a ray to the nearest ground geom; -1 if it misses them all."""
+    hits = [
+        distance
+        for geom in ground
+        if (distance := ray_to_geom(model, data, geom, origin, direction)) >= 0.0
+    ]
+    return min(hits, default=-1.0)
+
+
+def _heightfield_height(
+    model: mj.MjModel, data: mj.MjData, geom: int, x: float, y: float
+) -> float | None:
+    """Height of a level heightfield geom at world (x, y), None outside it.
+
+    Bilinear interpolation of the heightfield samples.
+    """
+    field = model.geom_dataid[geom]
+    size_x, size_y, size_z, _ = model.hfield_size[field]
+    centre = data.geom_xpos[geom]
+    local_x, local_y = x - centre[0], y - centre[1]
+    if abs(local_x) > size_x or abs(local_y) > size_y:
+        return None
+    n_rows, n_cols = int(model.hfield_nrow[field]), int(model.hfield_ncol[field])
+    start = int(model.hfield_adr[field])
+    heights = model.hfield_data[start : start + n_rows * n_cols].reshape(n_rows, n_cols)
+
+    col = (local_x + size_x) / (2 * size_x) * (n_cols - 1)
+    row = (local_y + size_y) / (2 * size_y) * (n_rows - 1)
     c0 = int(np.clip(np.floor(col), 0, n_cols - 2))
     r0 = int(np.clip(np.floor(row), 0, n_rows - 2))
     fc, fr = col - c0, row - r0
@@ -49,23 +125,64 @@ def ground_height(model: mj.MjModel, x: float, y: float) -> float:
         + heights[r0 + 1, c0] * (1 - fc) * fr
         + heights[r0 + 1, c0 + 1] * fc * fr
     )
-    return float(model.geom("floor").pos[2]) + float(value) * size_z
+    return float(centre[2]) + float(value) * size_z
 
 
-def spawn_height(world_spec: mj.MjSpec, x: float = 0.0, y: float = 0.0) -> float:
-    """Core height that puts the robot just above the ground under its legs.
+def ground_height(
+    model: mj.MjModel,
+    data: mj.MjData,
+    ground: tuple[int, ...],
+    x: float,
+    y: float,
+) -> float:
+    """Height of the highest ground at world (x, y); -inf if there is none.
 
-    Compiles the bare world once (about 10-20 ms), samples the terrain on a
-    grid covering the leg span around (x, y), and returns a core height that
+    Heightfields are interpolated from their samples, level planes are taken
+    as unbounded, and any other ground piece is found with a vertical ray.
+    Used for the spawn height and to tell when the vision rays start below
+    the ground - never as a controller input, since a real robot would not
+    have a map of the ground.
+    """
+    down = np.array([0.0, 0.0, -1.0])
+    heights = []
+    for geom in ground:
+        kind = model.geom_type[geom]
+        if kind == mj.mjtGeom.mjGEOM_HFIELD:
+            height = _heightfield_height(model, data, geom, x, y)
+        elif kind == mj.mjtGeom.mjGEOM_PLANE:
+            height = float(data.geom_xpos[geom, 2])
+        else:
+            origin = np.array([x, y, RAY_START_Z])
+            distance = ray_to_geom(model, data, geom, origin, down)
+            height = RAY_START_Z - distance if distance >= 0.0 else None
+        if height is not None:
+            heights.append(height)
+    return max(heights, default=-np.inf)
+
+
+def spawn_height(
+    world_spec: mj.MjSpec, reach: float, x: float = 0.0, y: float = 0.0
+) -> float:
+    """Core height that puts the robot just above the ground under it.
+
+    Compiles the bare world once (about 10-20 ms), samples the ground on a
+    grid covering the body's `reach` around (x, y), and returns a core height that
     leaves `SPAWN_CLEARANCE` between the robot's lowest point and the highest
     sample. Spawn with `correct_collision_with_floor=False` afterwards.
     """
     bare = world_spec.compile()
-    offsets = np.linspace(-LEG_SPAN_RADIUS, LEG_SPAN_RADIUS, 29)
+    data = mj.MjData(bare)
+    mj.mj_kinematics(bare, data)
+    ground = ground_geoms(bare)
+    radius = reach + REACH_MARGIN
+    offsets = np.linspace(-radius, radius, 29)
     highest = max(
-        ground_height(bare, x + dx, y + dy)
+        ground_height(bare, data, ground, x + dx, y + dy)
         for dx in offsets
         for dy in offsets
-        if dx * dx + dy * dy <= LEG_SPAN_RADIUS**2
+        if dx * dx + dy * dy <= radius**2
     )
+    if not np.isfinite(highest):
+        msg = f"no ground under the spawn point ({x}, {y})"
+        raise ValueError(msg)
     return highest + CORE_ABOVE_LOWEST_POINT + SPAWN_CLEARANCE

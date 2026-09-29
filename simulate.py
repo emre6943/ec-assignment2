@@ -9,12 +9,13 @@ averaged over the terrains the run walks. LOWER IS BETTER. `walk` only measures
 (`Score`); `fitness` turns the measurements into the number the EA minimises.
 The distance term is ARIEL's own `distance_to_target`; the two posture terms
 are ours (decision D15). A spider carries its body on its legs: at rest
-spider_16's core lies on the ground, so it has to push itself up to avoid
-the ground penalty.
+spider_16's core lies on the ground, so it would have to push itself up to
+avoid the ground penalty - which its motors turn out to be too weak for
+(see bodies.py).
 
 The pieces:
 
-- `build_model`   spider_16 on a fresh `RuggedTerrainWorld()`, spawned above it
+- `build_model`   the body on a fresh `RuggedTerrainWorld()`, spawned above it
 - `walk`          run one episode with one controller; return its `Score`
 - `evaluate`      average `walk` over several terrains
 - `fitness`       combine a `Score` into the number the EA minimises
@@ -39,18 +40,18 @@ import numpy as np
 import numpy.typing as npt
 
 # Local libraries (ARIEL)
-from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import spider_16
 from ariel.simulation.environments import BaseWorld, RuggedTerrainWorld
 from ariel.simulation.tasks.targeted_locomotion import distance_to_target
 
 # Local libraries
+from bodies import DEFAULT_BODY, body_info, build_body
+from genome import genotype_length, split
 from network import Genotype, NetworkShape, forward, parse_hidden
 from sensors import CORE_BODY, HALF_PI, n_inputs, read_inputs
-from terrain import spawn_height
+from terrain import ground_geoms, spawn_height
 
 SPAWN_XY: tuple[float, float] = (0.0, 0.0)
 TARGET_XY: npt.NDArray[np.float64] = np.array([2.0, 0.0])
-N_OUTPUTS: int = 16  # one per hinge of spider_16 (checked against model.nu)
 
 # Given to a controller that blew up (NaN) or fell out of the world. The robot
 # starts 2 m from the target, so no genuine run comes anywhere near this.
@@ -67,6 +68,8 @@ class SimConfig:
     control_every: int = 10  # physics steps per network update (10 x 2 ms = 50 Hz)
     vision: bool = True  # the 10 terrain-sensing rays as extra inputs
     hidden_layers: str = "16"  # neurons per hidden layer, e.g. "16" or "8,8" (D6)
+    body: str = DEFAULT_BODY  # a John Set body (bodies.BODIES, decision D1)
+    evolve_tempo: bool = False  # a tempo gene sets the clock (genome.py, D17)
     ground_contact_weight: float = 0.5  # metres-equivalent for lying down all run
     upside_down_weight: float = 1.0  # metres-equivalent for being flipped all run
 
@@ -75,33 +78,46 @@ class SimConfig:
     early_stop_time: float = 5.0  # when a hopeless walk is judged (if enabled)
 
     @property
+    def hinges(self) -> int:
+        """Motors of the body: the network's outputs."""
+        return body_info(self.body).hinges
+
+    @property
+    def genotype_length(self) -> int:
+        """Genes per individual: the weights, plus the tempo gene if evolved."""
+        return genotype_length(self.shape, self.evolve_tempo)
+
+    @property
     def shape(self) -> NetworkShape:
         """The network shape, hence the genotype length."""
         return NetworkShape(
-            n_inputs(self.vision), parse_hidden(self.hidden_layers), N_OUTPUTS
+            n_inputs(self.vision, self.hinges),
+            parse_hidden(self.hidden_layers),
+            self.hinges,
         )
 
 
 def build_model(
     world_factory: Callable[[], BaseWorld] = RuggedTerrainWorld,
+    body: str = DEFAULT_BODY,
 ) -> mj.MjModel:
-    """Compile spider_16 on a newly generated world (a new random terrain).
+    """Compile `body` on a newly generated world (a new random terrain).
 
     `world_factory` is only replaced in tests (with a flat world, whose
     results are deterministic).
     """
     mj.set_mjcb_control(None)  # MuJoCo's control callback is global; keep it off
     world = world_factory()
-    robot = spider_16()
-    spawn_z = spawn_height(world.spec, *SPAWN_XY)
+    robot = build_body(body)
+    spawn_z = spawn_height(world.spec, body_info(body).reach, *SPAWN_XY)
     world.spawn(
         robot.spec,
         position=[*SPAWN_XY, spawn_z],
         correct_collision_with_floor=False,
     )
     model = world.spec.compile()
-    if model.nu != N_OUTPUTS:
-        msg = f"spider_16 has {model.nu} actuators, expected {N_OUTPUTS}"
+    if model.nu != body_info(body).hinges:
+        msg = f"{body} has {model.nu} actuators, expected {body_info(body).hinges}"
         raise RuntimeError(msg)
     return model
 
@@ -139,11 +155,13 @@ def fitness(score: Score, config: SimConfig, movement_weight: float = 0.0) -> fl
     )
 
 
-def core_touches_ground(data: mj.MjData, core_geom: int, floor_geom: int) -> bool:
-    """True if any current contact is between the core and the ground."""
+def core_touches_ground(
+    data: mj.MjData, core_geom: int, ground: tuple[int, ...]
+) -> bool:
+    """True if any current contact is between the core and a ground geom."""
     pairs = data.contact.geom[: data.ncon]
     return bool(
-        np.any((pairs == core_geom).any(axis=1) & (pairs == floor_geom).any(axis=1))
+        np.any((pairs == core_geom).any(axis=1) & np.isin(pairs, ground).any(axis=1))
     )
 
 
@@ -174,10 +192,11 @@ def walk(
       target - it is hopeless. It keeps the distance it has at that moment.
     """
     shape: NetworkShape = config.shape
+    weights, clock_hz = split(genotype, shape, config.evolve_tempo)
     core_id = model.body(CORE_BODY).id
     core_geom = model.geom(CORE_BODY).id
-    floor_geom = model.geom("floor").id
-    vision_floor = floor_geom if config.vision else None
+    ground = ground_geoms(model)
+    vision_ground = ground if config.vision else None
 
     data = mj.MjData(model)
     mj.mj_resetData(model, data)
@@ -203,10 +222,10 @@ def walk(
                 break
 
         updates += 1
-        touching += core_touches_ground(data, core_geom, floor_geom)
+        touching += core_touches_ground(data, core_geom, ground)
         flipped += is_upside_down(data, core_id)
-        inputs = read_inputs(model, data, core_id, TARGET_XY, vision_floor)
-        data.ctrl[:] = forward(genotype, shape, inputs) * HALF_PI
+        inputs = read_inputs(model, data, core_id, TARGET_XY, vision_ground, clock_hz)
+        data.ctrl[:] = forward(weights, shape, inputs) * HALF_PI
         mj.mj_step2(model, data)
         mj.mj_step(model, data, nstep=config.control_every - 1)
 
@@ -260,6 +279,7 @@ def run_terrains(
     directory: Path,
     n_terrains: int,
     world_factory: Callable[[], BaseWorld] = RuggedTerrainWorld,
+    body: str = DEFAULT_BODY,
 ) -> tuple[str, ...]:
     """The terrains one seed uses for its whole run, generated on first use.
 
@@ -280,7 +300,7 @@ def run_terrains(
         path = directory / f"terrain{index}.mjb"
         if not path.exists():
             partial = directory / f"terrain{index}.{os.getpid()}.partial"
-            mj.mj_saveModel(build_model(world_factory), str(partial), None)
+            mj.mj_saveModel(build_model(world_factory, body), str(partial), None)
             try:
                 os.link(partial, path)
             except FileExistsError:

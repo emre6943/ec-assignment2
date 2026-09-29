@@ -1,9 +1,10 @@
 """What the controller network is told about the world (decision D5).
 
-The input vector, 34 values, each scaled to roughly [-1, 1]:
+The input vector - 34 values for spider_16, each scaled to roughly [-1, 1]:
 
-    hinge angles        16   where each joint is now (proprioception)
-    clock                2   sin/cos of a 1 Hz beat to drive rhythmic gaits
+    hinge angles     one per hinge (16 for spider_16): where each joint is now
+    clock                2   sin/cos of a beat to drive rhythmic gaits
+                             (1 Hz, or an evolved tempo: genome.py)
     target               3   distance, sin(bearing), cos(bearing) in the
                              robot's own frame - "where is the goal from here"
     gravity              3   the world's up-direction seen from the core -
@@ -12,14 +13,15 @@ The input vector, 34 values, each scaled to roughly [-1, 1]:
                              the ground ahead and below on every side, and
                              (via the upward ray) whether the robot has flipped
 
-Vision can be switched off (`SimConfig.vision`), which leaves 24 inputs.
+Vision can be switched off (`SimConfig.vision`), which leaves 24 inputs for
+spider_16. Other bodies (`SimConfig.body`) have a different number of hinges.
 
 The robot's absolute position is deliberately NOT an input: the target vector
 carries the useful part of it in a form that means the same everywhere.
 
-spider_16 layout (measured): qpos[0:3] core position, qpos[3:7] core
-orientation quaternion, qpos[7:23] the 16 hinge angles; actuator i drives
-hinge i. "Forward" is defined as the core body's +x axis, so at spawn the
+Layout of every John Set body (measured): qpos[0:3] core position,
+qpos[3:7] core orientation quaternion, qpos[7:] one angle per hinge;
+actuator i drives hinge i. "Forward" is defined as the core body's +x axis, so at spawn the
 target at (2, 0) lies straight ahead (bearing 0). A positive bearing means
 the target is to the robot's left.
 """
@@ -30,7 +32,7 @@ import numpy as np
 import numpy.typing as npt
 
 # Local libraries
-from terrain import ground_height
+from terrain import ground_height, ray_to_ground
 
 type FloatArray = npt.NDArray[np.float64]
 
@@ -45,8 +47,8 @@ TARGET_DISTANCE_SCALE: float = 2.0  # the starting distance, so the input starts
 # plane, angle below horizontal) in degrees; a negative angle points upwards.
 # The four faces of the core are +x, +y, -x, -y; the legs stick out of them.
 #
-# The rays are cast against the terrain only (`mj_rayHfield`), so the robot's
-# own legs never block them - the leg along each face would otherwise hide
+# The rays are cast against the ground geoms only (`terrain.ground_geoms`), so
+# the robot's own legs never block them - the leg along each face would otherwise hide
 # that face's steep ray whenever the leg lies flat. This is our own code: no
 # sensor or marker is added to the robot, and nothing in ARIEL is touched.
 RAY_ORIGIN: npt.NDArray[np.float64] = np.array([0.0, 0.075, 0.25])  # body frame
@@ -78,16 +80,16 @@ RAY_DIRECTIONS: npt.NDArray[np.float64] = np.array(
     [_ray_direction(azimuth, depression) for azimuth, depression in RAYS]
 )
 
-N_BASE_INPUTS: int = 16 + 2 + 3 + 3
+N_TASK_INPUTS: int = 2 + 3 + 3  # clock, target, gravity
 
 
-def n_inputs(vision: bool) -> int:
-    """Length of the input vector."""
-    return N_BASE_INPUTS + (len(RAYS) if vision else 0)
+def n_inputs(vision: bool, hinges: int = 16) -> int:
+    """Length of the input vector for a body with `hinges` motors."""
+    return hinges + N_TASK_INPUTS + (len(RAYS) if vision else 0)
 
 
 def hinge_angles(data: mj.MjData) -> FloatArray:
-    """The 16 hinge angles, scaled from [-pi/2, pi/2] to [-1, 1]."""
+    """Every hinge angle, scaled from [-pi/2, pi/2] to [-1, 1]."""
     return np.asarray(data.qpos[7:], dtype=np.float64) / HALF_PI
 
 
@@ -96,7 +98,8 @@ def clock(time: float, freq_hz: float = CLOCK_HZ) -> FloatArray:
 
     A feed-forward network has no memory, so without some time signal it can
     only produce rhythm through feedback from its own body. This is an input
-    signal, not a CPG: nothing about it is evolved or coupled.
+    signal, not a CPG: one shared beat, not coupled to anything. Only its
+    frequency can be evolved (`SimConfig.evolve_tempo`, decision D17).
     """
     phase = 2.0 * np.pi * freq_hz * time
     return np.array([np.sin(phase), np.cos(phase)])
@@ -136,29 +139,13 @@ def gravity_in_body_frame(data: mj.MjData, core_id: int) -> FloatArray:
     return rotation[2, :].copy()
 
 
-def _distance_to_floor(
-    model: mj.MjModel,
-    data: mj.MjData,
-    floor_id: int,
-    origin: FloatArray,
-    direction: FloatArray,
-) -> float:
-    """Distance along the ray to the floor geom only; -1 if it misses."""
-    if model.geom_type[floor_id] == mj.mjtGeom.mjGEOM_HFIELD:
-        return float(mj.mj_rayHfield(model, data, floor_id, origin, direction, None))
-    # A flat plane (used by the tests): intersect with z = floor height.
-    if direction[2] > -1e-9:
-        return -1.0
-    return float((origin[2] - data.geom_xpos[floor_id, 2]) / -direction[2])
-
-
 def vision(
     model: mj.MjModel,
     data: mj.MjData,
     core_id: int,
-    floor_id: int,
+    ground: tuple[int, ...],
 ) -> FloatArray:
-    """The 10 ray distances to the terrain, scaled to [0, 1].
+    """The 10 ray distances to the ground (`ground` geoms), scaled to [0, 1].
 
     A ray that hits nothing reads 1 (maximum range): always the upward ray
     while the robot is upright. If the ray origin itself ends up below the
@@ -166,12 +153,12 @@ def vision(
     """
     rotation = data.xmat[core_id].reshape(3, 3)  # body axes as columns
     origin = data.xpos[core_id] + rotation @ RAY_ORIGIN
-    if origin[2] < ground_height(model, origin[0], origin[1]):
+    if origin[2] < ground_height(model, data, ground, origin[0], origin[1]):
         return np.zeros(len(RAYS))
 
     distances = np.array(
         [
-            _distance_to_floor(model, data, floor_id, origin, rotation @ direction)
+            ray_to_ground(model, data, ground, origin, rotation @ direction)
             for direction in RAY_DIRECTIONS
         ]
     )
@@ -179,20 +166,26 @@ def vision(
     return np.minimum(distances, RAY_MAX_RANGE) / RAY_MAX_RANGE
 
 
+def clock_rows(hinges: int) -> tuple[int, int]:
+    """Positions of the two clock inputs in the input vector."""
+    return (hinges, hinges + 1)
+
+
 def read_inputs(
     model: mj.MjModel,
     data: mj.MjData,
     core_id: int,
     target_xy: FloatArray,
-    floor_id: int | None,
+    ground: tuple[int, ...] | None,
+    clock_hz: float = CLOCK_HZ,
 ) -> FloatArray:
-    """Assemble the network's input vector (without vision if `floor_id` is None)."""
+    """Assemble the network's input vector (without vision if `ground` is None)."""
     parts = [
         hinge_angles(data),
-        clock(data.time),
+        clock(data.time, clock_hz),
         target_in_body_frame(data, core_id, target_xy),
         gravity_in_body_frame(data, core_id),
     ]
-    if floor_id is not None:
-        parts.append(vision(model, data, core_id, floor_id))
+    if ground is not None:
+        parts.append(vision(model, data, core_id, ground))
     return np.concatenate(parts)

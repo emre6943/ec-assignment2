@@ -5,8 +5,10 @@
 Every run evolves on its seed's training terrain. This asks the robustness
 question: does the evolved brain still walk on new ground? The first call
 generates `N_TEST_TERRAINS` plain `RuggedTerrainWorld()` terrains into
-`results/terrains/rugged/test/`; every later call reuses them, so all runs are
-tested on exactly the same unseen ground.
+`results/terrains/rugged/test/` (per body for bodies other than spider_16,
+since a saved terrain includes the robot); every later call reuses them, so
+all runs of a body are tested on exactly the same unseen ground. Runs trained
+on another world are skipped: only RuggedTerrainWorld changes between builds.
 
 For each run it writes `unseen.json` next to the run's other files:
 
@@ -28,6 +30,7 @@ import numpy as np
 from ariel.simulation.environments import RuggedTerrainWorld
 
 # Local libraries
+from bodies import DEFAULT_BODY
 from simulate import Score, SimConfig, evaluate_task, fitness, run_terrains
 
 TEST_TERRAIN_DIR = Path(__file__).parent / "results" / "terrains" / "rugged" / "test"
@@ -68,7 +71,6 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=10)
     args = parser.parse_args()
 
-    test_terrains = run_terrains(TEST_TERRAIN_DIR, N_TEST_TERRAINS, RuggedTerrainWorld)
     with mp.get_context("spawn").Pool(args.workers) as pool:
         for run in args.runs:
             config = load_sim_config(run)
@@ -76,11 +78,25 @@ def main() -> None:
                 print(f"{run}: skipped (no config, older format, or no best genotype)")
                 continue
             genotype = np.load(run / "best_genotype.npy").tolist()
-            training = json.loads((run / "config.json").read_text())["terrains"]
+            saved = json.loads((run / "config.json").read_text())
+            if saved.get("world", RuggedTerrainWorld.__name__) != (
+                RuggedTerrainWorld.__name__
+            ):
+                # The test terrains are fresh RuggedTerrainWorld builds, so they
+                # are only "unseen versions of the training world" for rugged runs.
+                print(f"{run}: skipped (trained on {saved['world']}, not rugged)")
+                continue
+            training = saved["terrains"]
             if not training:
                 print(f"{run}: skipped (no fixed training terrain: per_generation run)")
                 continue
 
+            test_dir = TEST_TERRAIN_DIR
+            if config.body != DEFAULT_BODY:
+                test_dir = TEST_TERRAIN_DIR / config.body
+            test_terrains = run_terrains(
+                test_dir, N_TEST_TERRAINS, RuggedTerrainWorld, config.body
+            )
             tasks = [(genotype, (path,), config, None) for path in training]
             tasks += [(genotype, (path,), config, None) for path in test_terrains]
             scores = pool.map(evaluate_task, tasks)

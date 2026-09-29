@@ -47,9 +47,11 @@ from ariel.ec import EA, EAOperation, FloatMutator, Individual, Population
 from ariel.simulation.environments import BaseWorld, RuggedTerrainWorld
 
 # Local libraries
+from genome import crossover, new_genotype, split
 from migration import Policy, plan_migration
-from network import Genotype, random_genotype
-from operators import neuron_crossover, tournament_select
+from network import Genotype
+from operators import tournament_select
+from sensors import clock_rows
 from simulate import (
     FAILED_SCORE,
     Score,
@@ -106,6 +108,7 @@ class EAConfig:
     mutation_sigma: float = 0.05  # chosen by the pilot (D8)
     mutation_rate: float = 1.0
     init_scale: float = 0.5
+    clock_boost: float = 1.0  # clock-input weights x this in new random genotypes (D17)
 
     # Terrain (decision D10). "per_run": one set of terrains per seed, kept for
     # every generation and shared by every condition with that seed.
@@ -206,7 +209,7 @@ class Experiment:
         self.terrain_paths: tuple[str, ...] = ()
         if self.fixed_terrain:
             self.terrain_paths = run_terrains(
-                self.terrain_dir, config.n_terrains, world_factory
+                self.terrain_dir, config.n_terrains, world_factory, sim.body
             )
         self.rng = operator_rng(config.seed)
 
@@ -242,13 +245,25 @@ class Experiment:
         """`island_size` random networks per island, weights from N(0, init_scale^2)."""
         return Population(
             [
-                new_individual(
-                    random_genotype(self.sim.shape, self.rng, self.config.init_scale),
-                    island,
-                )
+                new_individual(self.random_individual(), island)
                 for island in range(self.config.n_islands)
                 for _ in range(self.config.island_size)
             ]
+        )
+
+    def random_individual(self) -> Genotype:
+        """A random genotype: the initial population, and random search.
+
+        `clock_boost` applies to every random genotype, so in random search it
+        applies to every sample - the same starting distribution as the EA.
+        """
+        return new_genotype(
+            self.sim.shape,
+            self.rng,
+            evolve_tempo=self.sim.evolve_tempo,
+            clock_rows=clock_rows(self.sim.hinges),
+            init_scale=self.config.init_scale,
+            clock_boost=self.config.clock_boost,
         )
 
     def make_child(
@@ -256,7 +271,7 @@ class Experiment:
     ) -> Genotype:
         """Tournament -> (maybe) neuron crossover -> Gaussian mutation."""
         if self.config.algorithm == "random_search":
-            return random_genotype(self.sim.shape, self.rng, self.config.init_scale)
+            return self.random_individual()
 
         k = self.config.tournament_size
         parent_a = np.asarray(members[tournament_select(fitness, k, self.rng)].genotype)
@@ -264,7 +279,9 @@ class Experiment:
             parent_b = np.asarray(
                 members[tournament_select(fitness, k, self.rng)].genotype
             )
-            child = neuron_crossover(parent_a, parent_b, self.sim.shape, self.rng)
+            child = crossover(
+                parent_a, parent_b, self.sim.shape, self.sim.evolve_tempo, self.rng
+            )
         else:
             child = parent_a
         mutated = FloatMutator.gaussian(
@@ -352,7 +369,8 @@ class Experiment:
             paths = self.terrain_paths
         else:
             models = [
-                build_model(self.world_factory) for _ in range(self.config.n_terrains)
+                build_model(self.world_factory, self.sim.body)
+                for _ in range(self.config.n_terrains)
             ]
             paths = save_terrains(models, self.generation_terrain_dir, self.generation)
 
@@ -475,6 +493,7 @@ class Experiment:
         `spread` is the mean Euclidean distance of the genotypes to their
         centroid: how different the group's networks are. Comparing islands'
         spreads over time shows how quickly migration makes them alike.
+        Only the weights count; the tempo gene (D17) is on a different scale.
         """
         fitness = np.array([member.fitness for member in members])
         final = [compute_fitness(self.stored_score(m), self.sim) for m in members]
@@ -482,7 +501,14 @@ class Experiment:
             part: np.array([member.tags[part] for member in members])
             for part in SCORE_PARTS
         }
-        genotypes = np.array([member.genotype for member in members])
+        genotypes = np.array(
+            [
+                split(
+                    np.asarray(member.genotype), self.sim.shape, self.sim.evolve_tempo
+                )[0]
+                for member in members
+            ]
+        )
         spread = np.linalg.norm(genotypes - genotypes.mean(axis=0), axis=1).mean()
         immigrants = sum(
             member.tags.get("migrated_at") == self.generation for member in members

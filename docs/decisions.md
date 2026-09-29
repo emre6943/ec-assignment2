@@ -16,15 +16,15 @@ Status legend:
 
 | # | Decision | Status | Current choice |
 |---|---|---|---|
-| D1 | Body | ✅ | `john_set.spider_16` |
-| D2 | World | ✅ | `RuggedTerrainWorld`, ARIEL defaults; one random terrain per seed (D10) |
+| D1 | Body | ✅ | `john_set.spider_8` since 2026-09-29 (was `spider_16`, which cannot lift itself; D17) |
+| D2 | World | 🧪 re-deciding (D17) | `RuggedTerrainWorld` so far, ARIEL defaults; one random terrain per seed (D10) |
 | D2a | Spawn height on rugged terrain | 🟡 **awaiting OK** | Spawn above the ground, `correct_collision_with_floor=False` |
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
 | D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed |
 | D4 | Controller outputs | 🟡 | One output per hinge (16), direct position control |
 | D5 | Controller inputs | ✅ | 34: joint angles + clock + target vector + tilt + 10 vision rays |
 | D6 | Network shape | ✅ (pilot) | Fixed MLP, one hidden layer of 16; evolve weights only (832 weights) |
-| D7 | Crossover | 🟡 | Neuron-level uniform crossover |
+| D7 | Crossover | ✅ (experiment 12) | Neuron-level uniform crossover, p = 0.5; kept after testing it against mutation only |
 | D8 | Mutation | ✅ (pilot) | Gaussian perturbation of every weight, σ = 0.05 |
 | D9 | Selection | 🟡 | Tournament (parents) + generational with elitism (survivors) |
 | D10 | Terrain and noisy fitness | ✅ | One fixed terrain per seed, shared by all conditions with that seed |
@@ -34,13 +34,19 @@ Status legend:
 | D14 | Final evaluation | 🟡 | Best controllers re-tested on unseen terrains |
 | D15 | Fitness function | ✅ (weights 🟡) | Distance + penalties for the core touching the ground and for being upside down |
 | D16 | Curriculum and early stopping | ❌ rejected | Lost to the plain setup on one seed; kept behind flags, off by default |
+| D17 | Rhythm options and body/world rethink | 🧪 piloting | spider_16 cannot lift itself; spider_8 + rhythmic start + evolved tempo being tested |
 
 ---
 
-## D1. Body — ✅ `spider_16`
+## D1. Body — ✅ `spider_8` (was `spider_16` until 2026-09-29)
 
-16 hinges: 4 legs, 4 hinges each. It is symmetric, so it can walk in any direction, which
-suits a target-reaching task.
+**Now spider_8.** On 2026-09-29 the team switched to spider_8, because spider_16 turned
+out to be physically unable to lift its own body: its motors are too weak for its weight
+(measured in D17). Every experiment up to experiment 12 used spider_16; the
+research-question experiment is re-run on spider_8.
+
+**Why spider_16 was chosen first.** 16 hinges: 4 legs, 4 hinges each. It is symmetric, so
+it can walk in any direction, which suits a target-reaching task.
 
 Pilot on flat ground (200 evaluations of a simple sine-gait hill-climber, 5 seeds each,
 remaining distance to a target 2 m away; lower is better):
@@ -52,6 +58,8 @@ remaining distance to a target 2 m away; lower is better):
 | spider_12 | 1.64 | 0.10 | ~1.7× |
 
 spider_16 was as good as spider_8 and more consistent, at twice the cost per evaluation.
+That pilot only tested a sine gait on flat ground, so it could not show that spider_16
+never lifts its body; the video of the evolved controllers did.
 
 ## D2. World — ✅ `RuggedTerrainWorld`, ARIEL defaults
 
@@ -252,8 +260,10 @@ stick out.
 
 **How the rays are cast:**
 
-- We use MuJoCo's `mj_rayHfield`, which intersects a ray with the terrain only. In our
-  own code, the rays are computed 50 times a second, when the network is queried.
+- We intersect each ray with the ground geoms only (`terrain.ray_to_ground`: MuJoCo's
+  `mj_rayHfield` for heightfields, `mj_rayMesh` / `mju_rayGeom` for the other pieces of
+  OlympicArena). In our own code, the rays are computed 50 times a second, when the
+  network is queried.
 - **Why terrain-only:** MuJoCo's built-in rangefinder sensors also hit the robot itself.
   Because each leg lies along its face, the steep rays hit the leg instead of the ground.
   This happened all the time when the legs lay flat, and 23–48% of the time while
@@ -327,7 +337,7 @@ Best fitness at the end (lower is better; standing still scores 2.0):
   reasonable settings, not to prove one shape is better. It is a development choice, not
   part of the research question.
 
-## D7. Crossover — 🟡 neuron-level uniform crossover
+## D7. Crossover — ✅ neuron-level uniform crossover, kept after experiment 12
 
 Crossover builds a child from two parents. Three candidates:
 
@@ -371,6 +381,39 @@ random parent.
 Crossover probability: 0.5. The other half of the children are a copy of one parent. Every
 child is then mutated (D8). These values are identical across all research-question
 conditions.
+
+With the tempo gene (D17), the weights are crossed over as above and the child takes the
+tempo gene from one parent, chosen at random.
+
+**Does crossover help? Tested in experiment 12 (2026-09-29).** Same EA (islands migrating
+the best, spider_16, rugged, 5 seeds, 12,000 evaluations), once with crossover (p = 0.5)
+and once with mutation only (p = 0). Final fitness, lower is better:
+
+| seed | with crossover | mutation only |
+|---|---|---|
+| 0 | **1.545** | 1.562 |
+| 1 | **1.512** | 1.739 |
+| 2 | **1.561** | 1.613 |
+| 3 | 1.576 | 1.575 |
+| 4 | 1.841 | **1.737** |
+| mean ± sd | **1.607 ± 0.133** | 1.645 ± 0.087 |
+
+Two-sided Mann-Whitney U: p = 0.31 on the final fitness, p = 0.69 on the area under the
+curve. Not significant.
+
+**Decision: keep crossover (p = 0.5).**
+
+- It was better on 3 seeds, tied on 1 and worse on 1, and better on the mean. There is no
+  sign that it hurts.
+- Recombination is what makes this a genetic algorithm rather than a population of
+  parallel hill-climbers (Eiben & Smith 2015). It lets good neurons found in different
+  individuals be combined.
+- The research question is about migration. With crossover, an immigrant's neurons can be
+  combined with the natives' neurons; without it, an immigrant can only compete with them.
+  Removing crossover would take away one of the two ways migration can act.
+- **Limitation to state in the report:** with 5 seeds, a difference this small (about
+  0.04) cannot be shown to be real. The honest claim is "crossover does not hurt and may
+  help a little", not "crossover helps".
 
 ## D8. Mutation — ✅ Gaussian perturbation, σ = 0.05 (chosen by the pilot)
 
@@ -507,6 +550,13 @@ individuals, about 166 generations, about 17 minutes per run).
 
 ## D13. Baselines and controls — 🟡
 
+- **A standard EA** (`run.py --standard`, experiment 9): the same EA as one population of
+  80 with 8 elites and no migration, so only the population structure differs. It answers
+  a question the research question depends on: does the island model matter here at all?
+  If it doesn't, the migration policies can hardly differ either, and another research
+  question may be more interesting (mutation σ already showed a clear effect in the pilot,
+  D8).
+
 - **Random search** with the same evaluation budget: required by the spec, and nearly free
   to implement. Implemented as the same loop with every child drawn at random instead of
   bred (`run.py --algorithm random_search`). It keeps the same elites, so the best random
@@ -623,6 +673,76 @@ the plain long run):
 - Early stopping can kill "late starters" (robots that first stand up, then walk).
 - For the research question, the migration policies must be compared on the plain
   distance, which is logged in every run regardless of the flags.
+
+## D17. Can it walk at all? Body physics, world difficulty and rhythm — 🧪 piloting
+
+**Why spider_16 only shuffles.** Every John Set motor is capped by ARIEL at **0.66 N·m**.
+
+- spider_16 weighs 4 kg. With a foot 0.5 m out from the hip, holding the body up needs
+  about 5 N·m per leg, 7–8× more than a motor gives.
+- Measured: no static pose raises its core above resting height. The hip motors
+  saturate at 0.66 N·m and the joints do not move (commanded −90°, actual 0°).
+- Maximum *held* lift, found by hill-climbing over static poses:
+
+| body | lift |
+|---|---|
+| centipede_5 | 9.1 cm |
+| spider_8 | 6.1 cm |
+| baby_a | 4.9 cm |
+| gecko | 4.0 cm |
+| spider_16 | 0.6 cm |
+
+**Why rugged terrain makes it worse.** Along the path to the target:
+
+| world | mean slope | height range |
+|---|---|---|
+| RuggedTerrainWorld | **25°** | 0.38 m |
+| CraterTerrainWorld | 9° | 0.33 m |
+| AmphitheatreTerrainWorld | 7° | 0.20 m |
+| OlympicArena | 5° | 0.08 m |
+| SimpleFlatWorld | 0° | 0 m |
+
+**Why random brains barely move.** With default initialisation, the network's outputs
+swing with a standard deviation of only about 0.25 of their range (about ±22° commanded;
+measured on spider_8 and spider_16, 10 random networks each, flat ground). Evolution has
+to discover rhythm before it can improve a gait.
+
+**Rhythm options** (`genome.py`, both flags, off by default):
+
+- `--clock-boost 3`: at initialisation only, the weights from the two clock inputs are
+  multiplied by 3. The commanded swing roughly doubles (0.25 → 0.48 of the range, about
+  ±22° → ±43°), while only 25% of outputs sit at their limits. We chose 3 from a sweep of
+  1–6. Honest caveat: the joints themselves move about the same either way (standard
+  deviation 16–17° of the actual angle), because the weak servos cannot follow the larger
+  commands. The boost changes *what the network asks for* more than what the legs do.
+  It also applies to every random-search sample, so random search keeps the same starting
+  distribution as the EA.
+- `--evolve-tempo`: one extra gene sets the clock's frequency, mapped onto 0.25–4 Hz
+  (gene 0 = 1 Hz), and is mutated like any weight. Crossover takes it from either parent.
+- **Not a CPG:** the clock is a fixed input signal; nothing oscillates inside the network,
+  and there are no coupled oscillators. The spec itself says a controller needs
+  "something to drive rhythmic movement with".
+- **A grey area to argue in Methods:** evolving the tempo means evolving one parameter of
+  an open-loop oscillator, which is also something a CPG does. The difference is that a
+  CPG has one oscillator per joint, with evolved amplitudes, phases and couplings that
+  produce the movement themselves. Here a single shared beat is only an input; the
+  network decides every joint's movement. If the TA disagrees, `--evolve-tempo` is simply
+  left off (the clock is then a fixed 1 Hz).
+
+**Worlds made of several pieces.** Most ARIEL worlds have one ground geom, named `floor`.
+OlympicArena is built from a flat start box (named `floor`), an unnamed rugged heightfield
+strip where the target lies, an incline and a finish. Our code first assumed the ground is
+the `floor` geom only, so on OlympicArena the vision rays did not see the rugged strip and
+lying on the strip was not penalised (found in code review, 2026-09-29, before any
+OlympicArena result was used). `terrain.ground_geoms()` now takes every geom fixed to the
+world that can collide. On the other worlds that is exactly the `floor` geom, and scores
+there are bit-for-bit identical to before the change.
+
+**Team decision (2026-09-29): switch the body to spider_8**, the body that can lift itself.
+The world is being piloted (`experiments/13_walking_pilot.sh`): flat, OlympicArena and
+rugged, judged by video. Both are free choices in the spec, but must then stay fixed for
+the whole assignment, so the research-question experiment will be re-run on the final
+body and world.
 
 ## References (to verify when writing the report)
 

@@ -16,6 +16,7 @@ from sensors import (
     vision,
 )
 from simulate import build_model
+from terrain import ground_geoms
 
 DOWN, UP = 0, 1
 AHEAD = slice(2, 6)
@@ -31,7 +32,7 @@ def flat() -> tuple[mj.MjModel, mj.MjData]:
 def read(model: mj.MjModel, data: mj.MjData) -> np.ndarray:
     """Ray distances in metres."""
     mj.mj_forward(model, data)
-    readings = vision(model, data, model.body(CORE_BODY).id, model.geom("floor").id)
+    readings = vision(model, data, model.body(CORE_BODY).id, ground_geoms(model))
     return readings * RAY_MAX_RANGE
 
 

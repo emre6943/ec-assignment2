@@ -13,13 +13,16 @@ from itertools import pairwise
 from multiprocessing.pool import Pool
 from pathlib import Path
 
+import mujoco as mj
 import numpy as np
 import pytest
 from ariel.ec import FloatMutator, set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 
 from ea import EAConfig, Experiment, check_config, operator_rng
-from simulate import SimConfig
+from replay import make_controller
+from run import as_standard, finished_with
+from simulate import SimConfig, build_model
 
 TINY_SIM = SimConfig(duration=0.3, hidden_layers="4")
 
@@ -164,3 +167,53 @@ def test_a_rerun_removes_the_previous_runs_outputs(tmp_path: Path, pool: Pool) -
     ).evolve()
     assert not (out / "unseen.json").exists()
     assert (out / "summary.json").exists()
+
+
+def test_standard_ea_is_one_population_of_the_same_size() -> None:
+    island = EAConfig()
+    standard = as_standard(island)
+    assert standard.n_islands == 1
+    assert standard.island_size == island.n_islands * island.island_size
+    assert standard.n_elites == island.n_islands * island.n_elites
+    assert standard.policy == "none"
+    check_config(standard)
+
+
+def test_skip_done_only_skips_identical_finished_runs(
+    tmp_path: Path, pool: Pool
+) -> None:
+    config = tiny_config("best")
+    run_tiny(config, tmp_path / "run", pool)
+    assert finished_with(tmp_path / "run", config, TINY_SIM, "flat")
+    assert not finished_with(
+        tmp_path / "run", replace(config, n_migrants=2), TINY_SIM, "flat"
+    )
+    assert not finished_with(tmp_path / "run", config, TINY_SIM, "rugged")
+    assert not finished_with(tmp_path / "missing", config, TINY_SIM, "flat")
+
+
+def test_a_run_with_another_body_and_the_rhythm_options(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """spider_8 with an evolved tempo: the genotype carries one extra gene."""
+    sim = replace(TINY_SIM, body="spider_8", evolve_tempo=True)
+    config = replace(tiny_config("best"), clock_boost=3.0)
+    random.seed(0)
+    np.random.seed(0)
+    set_seed(0)
+    out = tmp_path / "run"
+    out.mkdir()
+    Experiment(config, sim, out, pool, world_factory=SimpleFlatWorld).evolve()
+    genotype = np.load(out / "best_genotype.npy")
+    assert genotype.shape == (sim.shape.n_weights + 1,)
+    assert sim.shape.n_outputs == 8
+
+    model = build_model(SimpleFlatWorld, "spider_8")
+    control = make_controller(genotype, sim, model)
+    data = mj.MjData(model)
+    mj.set_mjcb_control(control)
+    try:
+        mj.mj_step(model, data, nstep=10)
+    finally:
+        mj.set_mjcb_control(None)
+    assert np.all(np.isfinite(data.ctrl)) and np.any(data.ctrl != 0.0)
