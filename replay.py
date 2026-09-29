@@ -6,8 +6,9 @@
     uv run --project ../ariel python replay.py results/best/seed0 --flat         # flat ground
 
 By default the robot walks the terrain it was evolved on (saved with the run).
-`--new-terrain` gives it a brand-new `RuggedTerrainWorld()` it never saw - the
-robustness test - and `--flat` uses ARIEL's flat world. The video lands in the
+`--new-terrain` builds its world anew - for RuggedTerrainWorld a random
+terrain it never saw, the robustness test; OlympicArena is the same every
+time - and `--flat` uses ARIEL's flat world. The video lands in the
 run's folder as `replay*.mp4`, and the final distance to the target is printed.
 
 The controller is driven through MuJoCo's control callback here (the viewer
@@ -28,13 +29,14 @@ import numpy as np
 from mujoco import viewer
 
 # Local libraries (ARIEL)
-from ariel.simulation.environments import RuggedTerrainWorld, SimpleFlatWorld
+from ariel.simulation.environments import SimpleFlatWorld
 from ariel.utils.renderers import video_renderer
 from ariel.utils.video_recorder import VideoRecorder
 
 # Local libraries
 from genome import split
 from network import Genotype, forward
+from run import WORLDS
 from sensors import CORE_BODY, HALF_PI, read_inputs
 from simulate import TARGET_XY, SimConfig, build_model
 from terrain import ground_geoms
@@ -77,7 +79,8 @@ def main() -> None:
     if args.flat:
         model = build_model(SimpleFlatWorld, config.body)
     elif args.new_terrain or not training_terrains:
-        model = build_model(RuggedTerrainWorld, config.body)
+        worlds = {factory.__name__: factory for factory in WORLDS.values()}
+        model = build_model(worlds[run_config["world"]], config.body)
     else:
         model = mj.MjModel.from_binary_path(training_terrains[0])
     data = mj.MjData(model)

@@ -41,17 +41,17 @@ from ariel.simulation.environments import (
 )
 
 # Local libraries
-from bodies import BODIES, DEFAULT_BODY
+from bodies import BODIES, FIRST_BODY
 from ea import EAConfig, Experiment
 from migration import POLICIES
 from simulate import SimConfig
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
-# Every world is ARIEL's, used with its default settings. "rugged" was the
-# first experiment world; "flat" (SimpleFlatWorld) has no terrain at all and
-# "olympic" (OlympicArena) only a gentle rugged strip - decision D17 compares
-# them. Only RuggedTerrainWorld draws a new random terrain on every build.
+# Every world is ARIEL's, used with its default settings. "olympic"
+# (OlympicArena: a flat start, then a gentle rugged strip with the target) is
+# the final world (decision D2); "rugged" was the world of experiments 1-12.
+# Only RuggedTerrainWorld draws a new random terrain on every build.
 WORLDS = {
     "rugged": RuggedTerrainWorld,
     "flat": SimpleFlatWorld,
@@ -74,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="a standard EA: one population of n_islands x island_size, no migration",
     )
     parser.add_argument(
-        "--world", choices=tuple(WORLDS), default="rugged", help="an ARIEL world"
+        "--world", choices=tuple(WORLDS), default="olympic", help="an ARIEL world"
     )
     parser.add_argument("--seeds", type=int, nargs="+", default=[0])
     parser.add_argument("--workers", type=int, default=10)
@@ -153,7 +153,7 @@ def terrain_folder(results: Path, world: str, body: str, seed: int) -> Path:
     each body gets its own folder; spider_16 keeps the original location.
     """
     folder = results / "terrains" / world
-    if body != DEFAULT_BODY:
+    if body != FIRST_BODY:
         folder = folder / body
     return folder / f"seed{seed}"
 

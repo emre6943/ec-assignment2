@@ -3,8 +3,8 @@
 #
 # Question: before committing the research question to migration policies, does
 #           splitting the population into islands matter at all here?
-# Setup:    the default settings (16 hidden, sigma 0.05, 12,000 evaluations,
-#           10 s episodes) for three set-ups, seeds 0-2, same terrain per seed:
+# Setup:    the then-default settings (spider_16, rugged, 16 hidden, sigma 0.05,
+#           12,000 evaluations, 10 s episodes) for three set-ups, seeds 0-2, same terrain per seed:
 #             standard  one population of 80, 8 elites, no migration
 #             best      4 islands x 20, migrating the best (the default)
 #             none      4 islands x 20, never migrating
@@ -20,9 +20,11 @@ cd "$(dirname "$0")/.."
 if [ "$#" -gt 0 ]; then seeds=("$@"); else seeds=(0 1 2); fi
 
 for seed in "${seeds[@]}"; do
-    uv run --project ../ariel python run.py --standard --seeds "$seed"
-    uv run --project ../ariel python run.py --policy best --seeds "$seed"
-    uv run --project ../ariel python run.py --policy none --seeds "$seed"
+    for condition in --standard "--policy best" "--policy none"; do
+        # shellcheck disable=SC2086  # $condition is one or two words
+        uv run --project ../ariel python run.py $condition --seeds "$seed" \
+            --world rugged --body spider_16 --duration 10
+    done
 done
 
 uv run --project ../ariel python analyze.py results/standard results/best results/none \

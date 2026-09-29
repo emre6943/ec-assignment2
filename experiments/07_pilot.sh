@@ -17,6 +17,7 @@ for hidden in 8 16 8,8; do
         name="h${hidden/,/x}_s${sigma}"
         echo "=== $name"
         uv run --project ../ariel python run.py --policy best --seeds 0 \
+            --world rugged --body spider_16 --duration 10 \
             --hidden-layers "$hidden" --mutation-sigma "$sigma" \
             --max-evaluations 4000 --out "results/pilot/$name"
     done

@@ -14,6 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 uv run --project ../ariel python run.py --policy best --seeds 0 \
+    --world rugged --body spider_16 \
     --island-size 50 --n-migrants 5 --max-evaluations 120000 \
     --duration 15 --stop-at-target \
     --out results/overnight

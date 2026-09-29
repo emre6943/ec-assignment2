@@ -64,7 +64,7 @@ TARGET_RADIUS: float = 0.1  # within this many metres the target counts as reach
 class SimConfig:
     """Everything that defines an evaluation. Identical across all conditions."""
 
-    duration: float = 10.0  # seconds of simulated time per episode
+    duration: float = 15.0  # seconds of simulated time per episode (D12)
     control_every: int = 10  # physics steps per network update (10 x 2 ms = 50 Hz)
     vision: bool = True  # the 10 terrain-sensing rays as extra inputs
     hidden_layers: str = "16"  # neurons per hidden layer, e.g. "16" or "8,8" (D6)

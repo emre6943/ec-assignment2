@@ -21,7 +21,8 @@ cd "$(dirname "$0")/.."
 
 for body in snake gecko spider_8 turtle linkin_modified spider_16; do
     uv run --project ../ariel python run.py --policy best --seeds 0 1 \
-        --body "$body" --ground-contact-weight 0 --max-evaluations 4000 \
+        --body "$body" --world rugged --duration 10 \
+        --ground-contact-weight 0 --max-evaluations 4000 \
         --out "results/bodies/$body"
 done
 

@@ -30,7 +30,7 @@ import numpy as np
 from ariel.simulation.environments import RuggedTerrainWorld
 
 # Local libraries
-from bodies import DEFAULT_BODY
+from bodies import FIRST_BODY
 from simulate import Score, SimConfig, evaluate_task, fitness, run_terrains
 
 TEST_TERRAIN_DIR = Path(__file__).parent / "results" / "terrains" / "rugged" / "test"
@@ -92,7 +92,7 @@ def main() -> None:
                 continue
 
             test_dir = TEST_TERRAIN_DIR
-            if config.body != DEFAULT_BODY:
+            if config.body != FIRST_BODY:
                 test_dir = TEST_TERRAIN_DIR / config.body
             test_terrains = run_terrains(
                 test_dir, N_TEST_TERRAINS, RuggedTerrainWorld, config.body

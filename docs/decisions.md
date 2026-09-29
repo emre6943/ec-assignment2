@@ -17,7 +17,7 @@ Status legend:
 | # | Decision | Status | Current choice |
 |---|---|---|---|
 | D1 | Body | ✅ | `john_set.spider_8` since 2026-09-29 (was `spider_16`, which cannot lift itself; D17) |
-| D2 | World | 🧪 re-deciding (D17) | `RuggedTerrainWorld` so far, ARIEL defaults; one random terrain per seed (D10) |
+| D2 | World | ✅ | `OlympicArena` since 2026-09-29, ARIEL defaults (was `RuggedTerrainWorld`: too steep to walk on; D17) |
 | D2a | Spawn height on rugged terrain | 🟡 **awaiting OK** | Spawn above the ground, `correct_collision_with_floor=False` |
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
 | D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed |
@@ -29,12 +29,12 @@ Status legend:
 | D9 | Selection | 🟡 | Tournament (parents) + generational with elitism (survivors) |
 | D10 | Terrain and noisy fitness | ✅ | One fixed terrain per seed, shared by all conditions with that seed |
 | D11 | Island model settings | 🟡 | 4 islands, ring, migrate every 10 generations, replace worst |
-| D12 | Budget and stopping | ✅ rule / 🟡 size | Fixed budget of 12,000 evaluations per run (proposed); 10 s episodes |
+| D12 | Budget and stopping | ✅ rule / 🟡 size | Fixed budget of 12,000 evaluations per run; 15 s episodes on OlympicArena |
 | D13 | Baselines and controls | 🟡 | Random search + no-migration islands |
-| D14 | Final evaluation | 🟡 | Best controllers re-tested on unseen terrains |
+| D14 | Final evaluation | 🟡 | Best controllers re-tested on unseen terrains; for OlympicArena after experiment 14 |
 | D15 | Fitness function | ✅ (weights 🟡) | Distance + penalties for the core touching the ground and for being upside down |
 | D16 | Curriculum and early stopping | ❌ rejected | Lost to the plain setup on one seed; kept behind flags, off by default |
-| D17 | Rhythm options and body/world rethink | 🧪 piloting | spider_16 cannot lift itself; spider_8 + rhythmic start + evolved tempo being tested |
+| D17 | Rhythm options and body/world rethink | ✅ | spider_8 on OlympicArena; rhythmic start (`--clock-boost 3`) on, tempo gene dropped |
 
 ---
 
@@ -61,7 +61,33 @@ spider_16 was as good as spider_8 and more consistent, at twice the cost per eva
 That pilot only tested a sine gait on flat ground, so it could not show that spider_16
 never lifts its body; the video of the evolved controllers did.
 
-## D2. World — ✅ `RuggedTerrainWorld`, ARIEL defaults
+## D2. World — ✅ `OlympicArena` (was `RuggedTerrainWorld` until 2026-09-29)
+
+**Now OlympicArena** (team decision, 2026-09-29, after experiment 13). The spec lists it as
+a valid world: "SimpleFlatWorld, RuggedTerrainWorld, CraterTerrainWorld,
+AmphitheatreTerrainWorld, and OlympicArena are all valid choices", fixed for the whole
+assignment. Along our path it is a flat start (spawn at x = 0), then from x = 0.5 a
+rugged strip with bumps of a few centimetres, where the target (x = 2) lies. An uphill
+ramp begins beyond the target. The arena is 2 m wide with drops at the sides.
+
+- **Why not rugged:** its 25° slopes stopped every body and every setup we tried, even
+  spider_8 (experiment 13: 1.61 m left after 8,000 evaluations).
+- **Why not flat:** spider_8 solves it within about 2,000 evaluations, so every condition
+  of the research question would reach the target and only differ in speed.
+- **Why OlympicArena:** learnable but not trivial (experiment 13: 0.55 m left and still
+  improving at 8,000 evaluations), so the conditions can differ in speed *and* in the
+  final result.
+- **Its rugged strip is random too.** ARIEL draws it with unseeded Perlin noise on every
+  build, like RuggedTerrainWorld, only a few centimetres high. So everything in D10
+  applies: each seed gets one saved arena, shared by every condition with that seed, and
+  controllers can be re-tested on fresh arenas (D14). Evolved brains do specialise to
+  their strip: experiment 13's OlympicArena winner ends 0.55 m from the target on its own
+  arena, and 0.76-1.37 m away on 5 fresh ones.
+- *Correction, for the record:* we first wrote here that OlympicArena is identical on
+  every build, because its class has a `load_precompiled` option. ARIEL ships no
+  pre-built copy, so the option does nothing; the code review caught it the same day.
+
+**What follows is the history: why we first chose RuggedTerrainWorld** (experiments 1-12).
 
 `RuggedTerrainWorld` draws a **new random Perlin-noise terrain every time it is
 constructed**. The terrain generator is called without a seed in
@@ -153,7 +179,10 @@ changed the fitness instead (D15).
 
 > How does the emigrant-selection policy of an island-model EA (migrating the **best**,
 > the **worst**, or **random** individuals) affect convergence speed and final fitness when
-> evolving a neural-network controller for `spider_16` on rugged terrain?
+> evolving a neural-network controller for `spider_8` on OlympicArena?
+
+(The first version, experiment 8, used `spider_16` on rugged terrain; D1, D2 and D17
+explain the switch. The final experiment is experiment 14.)
 
 **Hypothesis (team):** migrating the best individuals converges fastest.
 
@@ -173,15 +202,17 @@ evolutionary algorithms*, Journal of Heuristics 7(4). This is the key citation.
 cannot be measured directly. Instead we report:
 
 1. **Evaluations to reach a threshold**: the first evaluation count at which the best
-   fitness drops below a fixed threshold (set from the pilot; `analyze.py` uses 1.6 by
-   default, which the pilot's better settings reached within about 1,400 evaluations).
+   fitness drops below a fixed threshold. Experiment 14 uses 0.8: the OlympicArena pilot
+   (experiment 13, with the tempo gene on and its own random strip) crossed it
+   mid-budget, between 3,000 and 5,000 evaluations. Experiment 8 used 1.6, which the rugged
+   pilot's better settings reached within about 1,400 evaluations.
 2. **Area under the best-fitness curve**, which rewards being good early.
 3. **Final fitness** at the budget cap, on the training terrain; robustness is reported
    separately as the distance reached on unseen terrains (D14).
 
 **Statistics** (`analyze.py`), on the final fitness and the AUC:
 
-- **A Friedman test across all five conditions, blocked by seed.** Conditions with the
+- **A Friedman test across all six conditions, blocked by seed.** Conditions with the
   same seed walk the same terrain (D10), so each seed is a matched block. This asks: do
   the conditions differ at all?
 - **Planned comparisons of each condition against `none`,** the no-migration control:
@@ -476,9 +507,12 @@ controller walks on changes its score. Three options were considered:
 
 **How it works (`--terrain-mode per_run`, the default):**
 
-- The first run with seed *s* generates a plain `RuggedTerrainWorld()` terrain and saves
-  it to `results/terrains/rugged/seed<s>/terrain0.mjb`.
-- Every other condition with seed *s* (best, worst, random, none, random search) loads
+- The first run with seed *s* builds a plain world (`RuggedTerrainWorld()` in
+  experiments 1-12, `OlympicArena()` in experiment 14) and saves it to
+  `<results>/terrains/<world>/[<body>/]seed<s>/terrain0.mjb`, where `<results>` is the
+  folder above the condition folders (`results/` for experiment 8, `results/olympic/` for
+  experiment 14).
+- Every other condition with seed *s* (best, worst, random, none, standard, random search) loads
   **the same file**. Conditions are compared on identical ground, which makes the
   comparison paired, and different seeds cover different terrains.
 - Elites keep their fitness instead of being re-evaluated, since the same controller on
@@ -524,10 +558,14 @@ the same for all conditions and the baseline, as a fair comparison needs.
 An "evaluation" is one individual walking the run's terrain(s). Random search is budgeted
 the same way.
 
-**Episode length: 10 s** (team decision, 2026-09-28; the template uses 15 s). No robot
-comes close to reaching the target in 15 s, and a shorter episode cuts the simulation cost
-by a third. The fitness is the distance at the end, so robots simply cover less ground;
-that is the same for every condition.
+**Episode length: 15 s on OlympicArena** (2026-09-29; the template's value). Experiments
+7-12 used 10 s: no spider_16 came close to the target, and a shorter episode cut the cost
+by a third. spider_8 on OlympicArena can reach the target, and experiment 13 ran at 15 s,
+so the final setup keeps the template's 15 s.
+
+**Final budget (experiment 14): 12,000 evaluations per run**, about 20 minutes on
+OlympicArena, about 10 hours for 6 conditions × 5 seeds. The OlympicArena pilot was still
+improving at 8,000 evaluations.
 
 **Measured cost** on this Mac (M3 Pro, 10 worker processes, vision on):
 
@@ -565,6 +603,12 @@ individuals, about 166 generations, about 17 minutes per run).
   Without it we could not tell whether migration matters at all.
 
 ## D14. Final evaluation — 🟡 re-test on unseen terrains
+
+**For OlympicArena (experiment 14):** its rugged strip is random on every build (D2), so
+the same test applies: re-test each best controller on fresh arenas. `unseen.py` still
+builds RuggedTerrainWorld test terrains only and skips other worlds; it gets the world
+from each run's `config.json` once experiment 14 has finished (code is not changed while
+experiments run). What follows describes the rugged runs (experiments 7-12).
 
 The fitness logged during a run comes from the seed's training terrain. For the headline
 numbers, also take each run's final best controller and evaluate it on **20 fresh terrains
@@ -674,7 +718,7 @@ the plain long run):
 - For the research question, the migration policies must be compared on the plain
   distance, which is logged in every run regardless of the flags.
 
-## D17. Can it walk at all? Body physics, world difficulty and rhythm — 🧪 piloting
+## D17. Can it walk at all? Body physics, world difficulty and rhythm — ✅ spider_8, OlympicArena
 
 **Why spider_16 only shuffles.** Every John Set motor is capped by ARIEL at **0.66 N·m**.
 
@@ -738,11 +782,23 @@ OlympicArena result was used). `terrain.ground_geoms()` now takes every geom fix
 world that can collide. On the other worlds that is exactly the `floor` geom, and scores
 there are bit-for-bit identical to before the change.
 
-**Team decision (2026-09-29): switch the body to spider_8**, the body that can lift itself.
-The world is being piloted (`experiments/13_walking_pilot.sh`): flat, OlympicArena and
-rugged, judged by video. Both are free choices in the spec, but must then stay fixed for
-the whole assignment, so the research-question experiment will be re-run on the final
-body and world.
+**Team decisions (2026-09-29): switch the body to spider_8**, the body that can lift
+itself, **and the world to OlympicArena** (D2), after the walking pilot (experiment 13):
+spider_8 reached the target on flat ground, got 0.55 m from it on OlympicArena, and stayed
+stuck on rugged terrain. Both are free choices in the spec, but must stay fixed for the
+whole assignment, so the research-question experiment is re-run on them (experiment 14).
+**Team decision (2026-09-29): keep `--clock-boost 3`, drop `--evolve-tempo`.** The spec
+asks for "a neural network whose weights you evolve" and rules out CPG-based controllers.
+With the clock boost, every evolved number is still a weight of the network (only their
+starting values change), so it is clearly within the rules. The tempo gene is an evolved
+number that is not a weight, and evolving an oscillator's frequency is one ingredient of a
+CPG; nothing forbids it, but it is not worth the risk:
+
+- the flat run *without* any rhythm option reached the target too (experiment 13);
+- the OlympicArena pilot had both options on, so there is no evidence the tempo gene
+  helped there.
+
+The clock therefore stays a fixed 1 Hz input. The tempo code stays behind its flag, off.
 
 ## References (to verify when writing the report)
 

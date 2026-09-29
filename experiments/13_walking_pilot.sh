@@ -20,7 +20,8 @@ common=(--policy best --seeds 0 --body spider_8 --duration 15 --max-evaluations 
 rhythm=(--clock-boost 3 --evolve-tempo)
 run=(uv run --project ../ariel python run.py)
 
-"${run[@]}" "${common[@]}" --world flat --out results/walking/flat_plain
+"${run[@]}" "${common[@]}" --clock-boost 1 --no-evolve-tempo --world flat \
+    --out results/walking/flat_plain
 "${run[@]}" "${common[@]}" "${rhythm[@]}" --world flat --out results/walking/flat_rhythm
 "${run[@]}" "${common[@]}" "${rhythm[@]}" --world olympic --out results/walking/olympic
 "${run[@]}" "${common[@]}" "${rhythm[@]}" --world rugged --out results/walking/rugged

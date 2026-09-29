@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Experiment 8: THE research-question experiment (decisions D3, D11-D14).
 #
-# Six conditions x five seeds, all with the default settings (one hidden layer
-# of 16, sigma 0.05, 12,000 evaluations, 10 s episodes, 80 individuals):
+# Six conditions x five seeds, all with the then-default settings (spider_16 on
+# rugged terrain, one hidden layer of 16, sigma 0.05, 12,000 evaluations, 10 s
+# episodes, 80 individuals). The final setup is experiment 14.
 #
 #   best / worst / random   the three emigrant-selection policies (4 islands x 20)
 #   none                    isolated islands (the control)
@@ -20,7 +21,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ "$#" -gt 0 ]; then seeds=("$@"); else seeds=(0 1 2 3 4); fi
-run=(uv run --project ../ariel python run.py --skip-done --seeds "${seeds[@]}")
+# The settings this experiment ran with (the defaults have moved on since).
+run=(uv run --project ../ariel python run.py --skip-done --seeds "${seeds[@]}"
+    --world rugged --body spider_16 --duration 10)
 
 for policy in best worst random none; do
     "${run[@]}" --policy "$policy"

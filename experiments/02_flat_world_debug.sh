@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-uv run --project ../ariel python run.py --world flat --policy best --seeds 0 \
+uv run --project ../ariel python run.py --world flat --body spider_16 --policy best --seeds 0 \
     --terrain-mode per_generation --duration 15 \
     --hidden-layers 8 --mutation-sigma 0.1 --max-evaluations 3000 \
     --ground-contact-weight 0 --upside-down-weight 0 \

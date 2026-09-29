@@ -12,6 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 uv run --project ../ariel python run.py --policy best --seeds 0 1 2 3 4 \
+    --world rugged --body spider_16 --duration 10 \
     --crossover-probability 0 --out results/no_crossover
 
 uv run --project ../ariel python analyze.py results/best results/no_crossover \

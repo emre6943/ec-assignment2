@@ -17,17 +17,24 @@ which is gitignored: each person's results stay on their own machine.
 | 5 | `05_long_run.sh` | More population and generations? | **Better:** 1.84 → 1.39 over 164 generations; flat after about generation 115. The robot shuffles rather than walks. | D12 |
 | 6 | `06_curriculum_vs_plain.sh` | Curriculum + early stopping? | **No:** early lead, then stalled at about 1.55 m while the plain run reached 1.46 m; also slower. Stopped at generation 86. | D16 |
 | 7 | `07_pilot.sh` | Which brain shape and mutation σ? | **One layer of 16, σ = 0.05.** σ = 0.2 was worst everywhere; a second layer did not help. | D6, D8 |
-| 8 | `08_main_experiment.sh` | **The research question:** best vs worst vs random vs no migration, plus standard EA and random search | **No measurable effect of the migration policy.** All five EA variants end at 1.59–1.62 (± ~0.12); random search is clearly worse (1.73). Friedman across all six: AUC p = 0.011, final p = 0.053, driven by random search; no planned comparison is significant. Unseen terrain: ~1.97 for all. See *Details*. | D3 |
+| 8 | `08_main_experiment.sh` | **The research question, first setup** (spider_16, rugged): best vs worst vs random vs no migration, plus standard EA and random search | **No measurable effect of the migration policy.** All five EA variants end at 1.59–1.62 (± ~0.12); random search is clearly worse (1.73). Friedman across all six: AUC p = 0.011, final p = 0.053, driven by random search; no planned comparison is significant. Unseen terrain: ~1.97 for all. See *Details*. | D3 |
 | 9 | `09_standard_vs_island.sh` | Are islands any better than one standard population of the same size? | **Not significantly** (3 seeds, Friedman p = 0.37): final fitness 1.54 for both; islands with migration far more consistent (std 0.03 vs 0.13) and ahead mid-budget; no migration slightly worse (1.58). Seeds 3–4 come with experiment 8. | D3, D11 |
 | 10 | `10_overnight_best.sh` | How good a walker can the best setup get with a big budget (4 × 50, 120,000 evaluations, 15 s)? | **1.82 → 1.37** (about 0.8 m walked in 15 s), almost all of it in the first 20,000 evaluations; no improvement at all after about generation 440 of 624. Genetic diversity collapsed early. 2 h 47 min. | — |
 | 11 | `11_body_pilot.sh` | Can another John Set body move better than spider_16 (whose motors cannot lift it)? | **No.** spider_16 1.50 and spider_8 1.52 lead; gecko 1.60, turtle 1.68, snake 1.72, linkin_modified 1.78 (distance, 2 seeds, 4,000 evaluations). | D1 |
 | 12 | `12_crossover_or_not.sh` | Does neuron-level crossover help, or would mutation alone do as well? | **Keep it, no proof it matters:** 1.607 with crossover vs 1.645 mutation only (5 seeds); better on 3 seeds, tied on 1, worse on 1; not significant (p = 0.31). | D7 |
-| 13 | `13_walking_pilot.sh` | Can spider_8 (which can lift itself) learn to *walk*, with the rhythm options, on flat / OlympicArena / rugged ground? Judged by video. | *running* - first result: on flat ground, without the rhythm options, spider_8 reached the target (fitness **0.02**) in 5 minutes. | D17 |
+| 13 | `13_walking_pilot.sh` | Can spider_8 (which can lift itself) learn to *walk*, with the rhythm options, on flat / OlympicArena / rugged ground? Judged by video. | **On flat ground, yes:** it reaches the target with or without the rhythm options (fitness 0.020 / 0.002). **OlympicArena:** 0.55 m from the target, still improving. **Rugged:** 1.61 m, as stuck as spider_16. The terrain, not only the body, was the blocker. | D17 |
+| 14 | `14_main_olympic.sh` | **The research question on the final setup** (spider_8, OlympicArena, 15 s, `--clock-boost 3`, no tempo gene): best vs worst vs random vs no migration, plus standard EA and random search | *running (after 15)* | D3 |
+| 15 | `15_olympic_long_run.sh` | How good does the final setup get on one seed with a big budget (80,000 evaluations)? Does spider_8 reach the target on OlympicArena? | *running* | — |
 
 Numbers are *fitness* (distance to the target plus posture penalties, D15; a robot that
 does not move scores 2.0) unless they say "m". Runs 1–6 used 15-second episodes and a
-hidden layer of 8 with σ = 0.1. Runs 7–8 use 10-second episodes, so their numbers are not
-directly comparable with 1–6.
+hidden layer of 8 with σ = 0.1. Runs 7–9, 11 and 12 use 10-second episodes, so their
+numbers are not directly comparable with 1–6.
+
+Experiments 1–12 used spider_16 on RuggedTerrainWorld; 13 compared worlds with spider_8;
+14 is the final setup (spider_8 on OlympicArena, D1, D2). Every script passes the body,
+world and episode length it ran with, so it still reproduces now that the defaults are the
+final setup.
 
 ## Details
 
@@ -172,3 +179,31 @@ probability 0 instead of 0.5. `best` is reused from experiment 8.
 - **Decision: keep crossover** (D7): it never clearly hurt, it was ahead on average, and
   it is the operator through which immigrants' neurons mix with the natives'. With 5
   seeds, the report can only claim that it does not hurt and may help a little.
+
+### 13: can spider_8 walk? (2026-09-29)
+
+**Why:** spider_16 cannot lift itself (D17), and every body in experiment 11 only
+wiggled. spider_8 can hold its core 6 cm up. Does it learn to *walk*, and on which ground?
+
+**Setup:** spider_8, seed 0, islands migrating the best, 15 s walks, 8,000 evaluations.
+"Rhythm" = `--clock-boost 3 --evolve-tempo` (D17).
+
+| run | ground | rhythm | best fitness | ended from the target | evolved tempo | wall-clock |
+|---|---|---|---|---|---|---|
+| flat_plain | SimpleFlatWorld | off | 0.020 | 0.02 m | (1 Hz fixed) | 5 min |
+| flat_rhythm | SimpleFlatWorld | on | **0.002** | **0.00 m** | 0.88 Hz | 7 min |
+| olympic | OlympicArena | on | 0.670 | 0.55 m | 0.67 Hz | 14 min |
+| rugged | RuggedTerrainWorld | on | 1.637 | 1.61 m | 2.7 Hz | 8 min |
+
+- **Flat ground is solved.** Both flat runs walk onto the target and stay there, with the
+  core off the ground. With the rhythm options it got there sooner (fitness below 0.1
+  after about 1,950 evaluations vs 2,170; below 0.5 after 1,230 vs 1,810). One seed, so
+  a hint only.
+- **OlympicArena is hard but learnable.** The robot crosses the flat start and gets about
+  1 m into the rugged strip. The best fitness fell steadily (1.05 → 0.84 → 0.76 → 0.67 at
+  1k / 3k / 5k / 7k evaluations) and had not levelled off at 8,000.
+- **Rugged terrain stays out of reach** even for spider_8 (1.70 → 1.64). Its evolved
+  tempo of 2.7 Hz suggests jittering rather than stepping. So the 25° slopes were a
+  blocker on their own, not just spider_16's weak motors.
+- **Code note:** the olympic run is the first with the fixed ground detection (D17,
+  "worlds made of several pieces"); no OlympicArena result from before the fix is used.

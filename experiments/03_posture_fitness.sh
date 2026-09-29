@@ -10,6 +10,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 uv run --project ../ariel python run.py --policy best --seeds 0 \
-    --terrain-mode per_generation --duration 15 \
+    --world rugged --body spider_16 --terrain-mode per_generation --duration 15 \
     --hidden-layers 8 --mutation-sigma 0.1 --max-evaluations 3000 \
     --out results/exp03_posture_fitness

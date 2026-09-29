@@ -9,5 +9,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 uv run --project ../ariel python run.py --policy best --seeds 0 \
-    --duration 15 --hidden-layers 8 --mutation-sigma 0.1 --max-evaluations 3000 \
+    --world rugged --body spider_16 --duration 15 --hidden-layers 8 --mutation-sigma 0.1 \
+    --max-evaluations 3000 \
     --out results/exp04_fixed_terrain

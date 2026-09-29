@@ -7,12 +7,11 @@ Assignment 1 evolved a body. This one takes a fixed body and evolves the weights
 neural-network controller, so that it walks towards a target. Our research question
 compares **island-model migration policies**.
 
-**Where we are (2026-09-29):** experiments 1-12 used `spider_16` on `RuggedTerrainWorld`.
-spider_16 turned out to be too weak to lift its own body, so it only shuffles. The team
-switched to **`spider_8`** (decision D17). The world is being re-decided with experiment
-13 (flat / OlympicArena / rugged), and the research-question experiment will then be
-re-run on the final body and world. The code's default body is still `spider_16`, so the
-earlier experiments reproduce; pass `--body spider_8` for the new setup.
+**The final setup (2026-09-29): `spider_8` on `OlympicArena`**, and those are now the
+code's defaults. Experiments 1-12 used `spider_16` on `RuggedTerrainWorld`: spider_16 is
+too weak to lift its own body, and rugged terrain stopped every body we tried (decisions
+D1, D2, D17). Their scripts pass their old settings explicitly, so they still reproduce.
+The research-question experiment on the final setup is `experiments/14_main_olympic.sh`.
 
 **New here? Read in this order:**
 
@@ -51,10 +50,10 @@ Then run everything from inside `assignment2/` as `uv run --project ../ariel pyt
 
 ## What the code does
 
-**The robot:** a body from ARIEL's John Set (`--body`): `spider_16` (4 legs × 4 hinges =
-16 motors, the default) or `spider_8` (4 legs × 2 hinges = 8 motors). It spawns in an ARIEL
-world (`--world`, default `rugged` = `RuggedTerrainWorld`) and has 10 seconds to walk
-towards a target 2 m away.
+**The robot:** a body from ARIEL's John Set (`--body`): `spider_8` (4 legs × 2 hinges =
+8 motors, the default) or e.g. `spider_16` (4 legs × 4 hinges). It spawns in an ARIEL world
+(`--world`, default `olympic` = `OlympicArena`: a flat start, then a gently rugged strip
+where the target lies) and has 15 seconds to walk to a target 2 m away.
 
 **The brain:** a feed-forward neural network. Numbers below are for spider_16, then
 spider_8:
@@ -71,8 +70,10 @@ spider_8:
   gene with `--evolve-tempo`.
 
 **Rhythm options** (decision D17, off by default): `--clock-boost 3` makes new random
-networks respond 3× more strongly to the clock, so they start with a clear rhythm;
-`--evolve-tempo` adds a gene that sets the clock's frequency (0.25-4 Hz).
+networks respond 3× more strongly to the clock, so they start with a clear rhythm; the
+final experiments use it. `--evolve-tempo` adds a gene that sets the clock's frequency
+(0.25-4 Hz); it is **not** used, because an evolved non-weight rhythm parameter comes too
+close to the spec's "no CPG" rule (D17).
 
 **The fitness** (lower is better):
 
@@ -96,10 +97,12 @@ Standing still scores 2.0.
 `run.py --standard` runs the same EA as **one population** (1 × 80, 8 elites, no
 migration), a standard EA to compare the island model against (experiment 9).
 
-**The terrain:** each seed gets one random rugged terrain, generated on its first use and
-saved in `results/terrains/rugged/seed<S>/` (`results/terrains/<world>/<body>/seed<S>/` for
-other bodies and worlds). Every condition with that seed walks exactly the same ground,
-which makes the comparison between policies fair.
+**The terrain:** OlympicArena's rugged strip and RuggedTerrainWorld are random on every
+build. So each seed's world is built once, on first use, and saved next to the condition
+folders: `<results>/terrains/<world>/<body>/seed<S>/` (spider_16 keeps
+`<results>/terrains/<world>/seed<S>/`), e.g. `results/olympic/terrains/...` for experiment
+14. Every condition with that seed walks exactly the same ground, which makes the
+comparison between policies fair.
 
 ## Code map
 
@@ -128,30 +131,38 @@ which makes the comparison between policies fair.
 
 ## Running experiments
 
-    uv run --project ../ariel python run.py --policy best --seeds 0 1 2 3 4
-    uv run --project ../ariel python run.py --algorithm random_search --seeds 0 1 2 3 4
+    uv run --project ../ariel python run.py --policy best --seeds 0 1 2 3 4 \
+        --clock-boost 3 --out results/mine/best
+    uv run --project ../ariel python run.py --algorithm random_search --seeds 0 1 2 3 4 \
+        --clock-boost 3 --out results/mine/random_search
     uv run --project ../ariel python run.py --help      # every setting is a flag
 
-- **Output:** each run writes to `results/<condition>/seed<S>/`:
+The defaults are the final body, world and episode length (spider_8, OlympicArena, 15 s);
+`--clock-boost 3` completes the final setup. Always pass `--out`: without it a run writes
+to `results/<condition>/`, where experiment 8's results live.
+
+- **Output:** each run writes to `<out>/seed<S>/`:
   - `config.json`: every setting of the run;
   - `log.csv`: per generation, per island and overall;
   - `database.db`: ARIEL's record of every individual;
   - `best_genotype.npy`: the best network, saved whenever it improves;
   - `summary.json`.
-- **Cost:** a default run (12,000 evaluations) takes about 17 minutes on a 10-core Mac.
+- **Cost:** a default run (12,000 evaluations) takes about 20 minutes on a 10-core Mac.
   `run.py` uses 10 worker processes; on a smaller machine pass `--workers 4` (or your
   core count). Run experiments **one after another**: two at once just makes each slower.
-- **The full experiment** for the report is `experiments/08_main_experiment.sh`: 6
-  conditions (4 migration policies, the standard EA, random search) × 5 seeds, about 7
-  hours, so run it overnight. It passes `--skip-done`, which skips any run already
-  finished with exactly the same settings, so an interrupted night can be resumed.
+- **The full experiment** for the report is `experiments/14_main_olympic.sh`: 6
+  conditions (4 migration policies, the standard EA, random search) × 5 seeds, about 10
+  hours, written to `results/olympic/`. It passes `--skip-done`, which skips any run
+  already finished with exactly the same settings, so an interrupted run can be resumed.
+  (`08_main_experiment.sh` is the same experiment on the first setup, spider_16 on rugged.)
 - **Useful flags:**
-  - `--body spider_8`: another John Set body;
+  - `--body spider_16`: another John Set body;
   - `--world rugged|flat|olympic|amphitheatre|crater`: another ARIEL world;
-  - `--clock-boost 3 --evolve-tempo`: the rhythm options (D17);
+  - `--clock-boost 3`: the rhythmic start used in the final setup (D17);
+    `--evolve-tempo` exists but is not used (D17);
   - `--standard`: one population of 80 instead of 4 islands of 20;
   - `--skip-done`: skip seeds that are already finished with the same settings;
-  - `--duration 15`: longer walks (seconds).
+  - `--duration 10`: shorter walks (seconds; 15 by default).
 - **Terrain files are per machine.** `results/` is not in git, so the same seed gives a
   *different* terrain on your laptop than on someone else's. For the final results, one
   person runs everything on one machine, or shares their `results/terrains/` folder.
@@ -163,15 +174,15 @@ which makes the comparison between policies fair.
 
 ## Looking at results
 
-    uv run --project ../ariel python plot.py results/best/seed0                  # one run's curves
-    uv run --project ../ariel python replay.py results/best/seed0                # its best walk (video)
-    uv run --project ../ariel python replay.py results/best/seed0 --new-terrain  # ...on unseen ground
-    uv run --project ../ariel python compare.py results/best/seed0 results/none/seed0
-    uv run --project ../ariel python unseen.py results/best/seed*                # robustness test
-    uv run --project ../ariel python analyze.py results/best results/worst results/random \
-        results/none results/standard results/random_search --reference none     # report figure + stats
+    uv run --project ../ariel python plot.py results/olympic/best/seed0          # one run's curves
+    uv run --project ../ariel python replay.py results/olympic/best/seed0        # its best walk (video)
+    uv run --project ../ariel python replay.py results/olympic/best/seed0 --viewer  # live 3D window
+    uv run --project ../ariel python compare.py results/olympic/best/seed0 results/olympic/none/seed0
+    uv run --project ../ariel python unseen.py results/best/seed*   # robustness test (rugged runs only)
+    uv run --project ../ariel python analyze.py results/olympic/{best,worst,random,none,standard,random_search} \
+        --threshold 0.8 --reference none --out results/olympic/analysis         # report figure + stats
 
-`analyze.py` writes `results/analysis/`:
+`analyze.py` writes to `--out` (default `results/analysis/`):
 
 - `convergence.png`: mean ± std across seeds, the plot the spec asks for;
 - `summary.csv` / `summary.md`: per run and per condition, the best fitness at the
@@ -207,7 +218,8 @@ Investigate **one aspect of the EA** as a research question.
 - **Body:** a free choice from `ariel...prebuilt_robots.john_set`. We chose `spider_16`,
   then switched to `spider_8` (D1, D17).
 - **World:** a free choice from `ariel.simulation.environments`, except
-  `SimpleTiltedWorld`. So far `RuggedTerrainWorld`; being re-decided (D17).
+  `SimpleTiltedWorld`. We chose `RuggedTerrainWorld`, then switched to `OlympicArena`
+  (D2, D17).
 - **Controller:** a neural network whose weights are evolved. **No CPGs.**
 
 **The spec's fitness** is the flat-ground distance from the core to the target, lower is

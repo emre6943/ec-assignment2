@@ -42,7 +42,10 @@ BODIES: tuple[str, ...] = (
     "centipede_4",
     "centipede_5",
 )
-DEFAULT_BODY: str = "spider_16"
+DEFAULT_BODY: str = "spider_8"  # the final body (decision D1, since 2026-09-29)
+# The body of experiments 1-12. Its saved terrains keep their original folders
+# (results/terrains/<world>/seed<S>/); every other body gets a subfolder.
+FIRST_BODY: str = "spider_16"
 CORE_BODY: str = "robot1_core"  # the core's name after world.spawn() prefixes it
 
 
