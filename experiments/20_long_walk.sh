@@ -6,8 +6,8 @@
 #        terms, stagnation rule) on seed 0 and experiment 15's arena. 15 s
 #        walks until 6,000 evaluations, then 30 s walks (D21), 24,000
 #        evaluations in all. About 1.5 hours.
-# The EA settings below are the ones before tuning: replace them with what
-# experiments 19 and 19b choose (D22) before running.
+#        Tuning (experiments 19 and 19b, D22) changed one setting: crossover
+#        probability 0.9 instead of 0.5. Everything else kept its value.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,6 +22,7 @@ uv run --project ../ariel python run.py --policy best --seeds 0 --workers 10 \
     --ground-contact-weight 1.0 --low-body-weight 1.0 --carry-height 0.04 \
     --work-imbalance-weight 0.5 --leg-imbalance-weight 0 \
     --speed-weight 0.5 --stop-at-target --stall-generations 15 \
+    --crossover-probability 0.9 \
     --final-duration 30 --final-duration-from 6000 \
     --max-evaluations 24000 --out "$out" > "$out/run.log" 2>&1
 

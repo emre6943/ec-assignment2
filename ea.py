@@ -58,8 +58,10 @@ from simulate import (
     SimConfig,
     build_model,
     evaluate_task,
+    parse_yaws,
     run_terrains,
     save_terrains,
+    terrain_yaw,
 )
 from simulate import fitness as compute_fitness
 
@@ -126,6 +128,10 @@ class EAConfig:
     # "per_generation": a fresh set every generation (noisy; for robustness).
     terrain_mode: TerrainMode = "per_run"
     n_terrains: int = 1
+    # Degrees the robot starts turned by, cycled over the terrains (decision
+    # D23): "0,30,-30" with 3 terrains starts one walk facing the target and
+    # two turned away from it, so a brain has to steer.
+    spawn_yaws: str = "0"
 
     # Curriculum and early stopping (decision D16); both off by default. Over
     # the first `curriculum_generations` generations, the reward for moving at
@@ -165,6 +171,17 @@ def check_config(config: "EAConfig") -> None:
         problems.append("final_duration must be 0 (off) or positive")
     if config.final_duration_from < 0:
         problems.append("final_duration_from must be 0 or more")
+    try:
+        yaws = parse_yaws(config.spawn_yaws)
+    except ValueError:
+        problems.append(
+            f"spawn_yaws must be comma-separated degrees, got {config.spawn_yaws!r}"
+        )
+    else:
+        if len(yaws) > config.n_terrains:
+            problems.append("spawn_yaws has more values than there are terrains")
+        if any(abs(yaw) > 180 for yaw in yaws):
+            problems.append("spawn_yaws must lie between -180 and 180 degrees")
     if config.stall_generations < 0:
         problems.append("stall_generations must be 0 (off) or more")
     if config.stall_generations > 0:
@@ -262,7 +279,11 @@ class Experiment:
         self.terrain_paths: tuple[str, ...] = ()
         if self.fixed_terrain:
             self.terrain_paths = run_terrains(
-                self.terrain_dir, config.n_terrains, world_factory, sim.body
+                self.terrain_dir,
+                config.n_terrains,
+                world_factory,
+                sim.body,
+                parse_yaws(config.spawn_yaws),
             )
         self.rng = operator_rng(config.seed)
 
@@ -482,9 +503,10 @@ class Experiment:
         if self.fixed_terrain:
             paths = self.terrain_paths
         else:
+            yaws = parse_yaws(self.config.spawn_yaws)
             models = [
-                build_model(self.world_factory, self.sim.body)
-                for _ in range(self.config.n_terrains)
+                build_model(self.world_factory, self.sim.body, terrain_yaw(yaws, i))
+                for i in range(self.config.n_terrains)
             ]
             paths = save_terrains(models, self.generation_terrain_dir, self.generation)
 

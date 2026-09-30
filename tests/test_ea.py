@@ -9,7 +9,7 @@ import json
 import multiprocessing as mp
 import random
 from collections.abc import Iterator
-from dataclasses import asdict, replace
+from dataclasses import replace
 from itertools import pairwise
 from multiprocessing.pool import Pool
 from pathlib import Path
@@ -145,9 +145,12 @@ def test_operator_stream_is_independent_of_ariels_mutation_stream() -> None:
         ("migration_interval", 0),
         ("final_duration", -1),
         ("final_duration_from", -1),
+        ("spawn_yaws", "north"),
+        ("spawn_yaws", "0,30"),  # more turns than the one terrain
+        ("spawn_yaws", "270"),
     ],
 )
-def test_impossible_settings_are_rejected(setting: str, value: int) -> None:
+def test_impossible_settings_are_rejected(setting: str, value: int | str) -> None:
     with pytest.raises(ValueError, match=setting):
         check_config(replace(EAConfig(), **{setting: value}))
 
@@ -288,10 +291,22 @@ def test_walks_get_longer_once_and_everyone_walks_again(
     )
     assert float(rows[switch]["mean_seconds"]) > TINY_SIM.duration
     assert (tmp_path / "run" / "best_genotype_short.npy").exists()
+    assert final_sim_config(tmp_path / "run").duration == 0.5  # replay, unseen
 
 
-def test_replay_and_unseen_use_the_longer_walks() -> None:
-    saved = {"sim": asdict(TINY_SIM), "ea": asdict(EAConfig(final_duration=0.5))}
-    assert final_sim_config(saved).duration == 0.5
-    del saved["ea"]["final_duration"]  # a config from before D21
-    assert final_sim_config(saved).duration == TINY_SIM.duration
+def test_replay_and_unseen_use_the_walks_a_run_ended_with(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """Before the switch (or before D21), a run's walks are the short ones."""
+    config = replace(tiny_config("best"), final_duration=0.5, final_duration_from=10**6)
+    run_tiny(config, tmp_path / "run", pool)
+    assert final_sim_config(tmp_path / "run").duration == TINY_SIM.duration
+    log_file = tmp_path / "run" / "log.csv"
+    with log_file.open(newline="") as file:
+        rows = list(csv.DictReader(file))
+    fieldnames = [name for name in rows[0] if name != "duration"]
+    with log_file.open("w", newline="") as file:  # a log from before D21
+        writer = csv.DictWriter(file, fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    assert final_sim_config(tmp_path / "run").duration == TINY_SIM.duration

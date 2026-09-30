@@ -4,6 +4,7 @@
     uv run --project ../ariel python replay.py results/best/seed0 --viewer       # live window
     uv run --project ../ariel python replay.py results/best/seed0 --new-terrain  # unseen ground
     uv run --project ../ariel python replay.py results/best/seed0 --flat         # flat ground
+    uv run --project ../ariel python replay.py results/best/seed0 --duration 30  # walk longer
 
 By default the robot walks the terrain it was evolved on (saved with the run).
 `--new-terrain` builds its world anew - a random terrain (RuggedTerrainWorld)
@@ -21,6 +22,7 @@ physics steps and hold the output in between.
 import argparse
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 # Third-party libraries
@@ -72,10 +74,15 @@ def main() -> None:
     ground = parser.add_mutually_exclusive_group()
     ground.add_argument("--new-terrain", action="store_true", help="unseen terrain")
     ground.add_argument("--flat", action="store_true", help="walk on flat ground")
+    parser.add_argument(
+        "--duration", type=float, help="seconds to walk (default: the run's walks)"
+    )
     args = parser.parse_args()
 
     run_config = json.loads((args.run / "config.json").read_text())
-    config = final_sim_config(run_config)
+    config = final_sim_config(args.run)
+    if args.duration:
+        config = replace(config, duration=args.duration)
     genotype = np.load(args.run / "best_genotype.npy")
     training_terrains = run_config.get("terrains", [])
     if args.flat:

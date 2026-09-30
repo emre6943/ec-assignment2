@@ -8,7 +8,7 @@ import pytest
 from ariel.simulation.environments import SimpleFlatWorld
 
 from bodies import body_info
-from sensors import CORE_BODY
+from sensors import CORE_BODY, heading
 from simulate import (
     CARRY_HEIGHT,
     Score,
@@ -101,6 +101,25 @@ def test_run_terrains_reuses_existing_files(tmp_path: Path) -> None:
     assert first == second
     assert (tmp_path / "terrain0.mjb").stat().st_mtime_ns == stamp
     assert sorted(p.name for p in tmp_path.iterdir()) == ["terrain0.mjb"]
+
+
+def test_run_terrains_turns_the_robot_per_terrain(tmp_path: Path) -> None:
+    """D23: the yaws are cycled over the terrains and baked into their files."""
+    paths = run_terrains(tmp_path, 4, SimpleFlatWorld, "spider_8", (0.0, 30.0, -30.0))
+    names = [Path(path).name for path in paths]
+    assert names == [
+        "terrain0.mjb",
+        "terrain1_yaw30.mjb",
+        "terrain2_yaw-30.mjb",
+        "terrain3.mjb",
+    ]
+    for path, yaw in zip(paths, (0.0, 30.0, -30.0, 0.0), strict=True):
+        model = mj.MjModel.from_binary_path(path)
+        data = mj.MjData(model)
+        mj.mj_forward(model, data)
+        assert np.degrees(heading(data, model.body(CORE_BODY).id)) == pytest.approx(
+            yaw, abs=1e-6
+        )
 
 
 def test_carry_shortfall_is_lenient_and_bounded() -> None:

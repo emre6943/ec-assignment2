@@ -33,6 +33,8 @@ individuals would no longer be compared fairly (D10).
 """
 
 # Standard library
+import csv
+import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
@@ -120,11 +122,13 @@ class SimConfig:
 def build_model(
     world_factory: Callable[[], BaseWorld] = RuggedTerrainWorld,
     body: str = DEFAULT_BODY,
+    yaw: float = 0.0,
 ) -> mj.MjModel:
     """Compile `body` on a newly generated world (a new random terrain).
 
-    `world_factory` is only replaced in tests (with a flat world, whose
-    results are deterministic).
+    `yaw` turns the robot at spawn by that many degrees about the vertical
+    (left for positive), through ARIEL's own `spawn(rotation=...)`; at 0 the
+    target lies straight ahead (decision D23).
     """
     mj.set_mjcb_control(None)  # MuJoCo's control callback is global; keep it off
     world = world_factory()
@@ -133,6 +137,7 @@ def build_model(
     world.spawn(
         robot.spec,
         position=[*SPAWN_XY, spawn_z],
+        rotation=(0.0, 0.0, yaw) if yaw else None,
         correct_collision_with_floor=False,
     )
     model = world.spec.compile()
@@ -186,16 +191,23 @@ def saved_sim_config(saved: dict[str, object]) -> SimConfig:
     return SimConfig(**{"body": FIRST_BODY, **saved})
 
 
-def final_sim_config(saved: dict[str, dict[str, object]]) -> SimConfig:
-    """The SimConfig a run's walks ended with, from its whole config.json.
+def final_sim_config(run: Path) -> SimConfig:
+    """The SimConfig a run's walks ended with.
 
-    That is its "sim" settings (`saved_sim_config`), with the longer walks if
-    the run switched to them (`ea.EAConfig.final_duration`, decision D21).
+    That is the "sim" settings of its config.json (`saved_sim_config`), with
+    the walk length of its last logged generation: the longer walks only if
+    the run got far enough to switch to them (`ea.EAConfig.final_duration`,
+    decision D21). A log from before D21 records no walk length.
     """
+    saved = json.loads((run / "config.json").read_text())
     config = saved_sim_config(saved["sim"])
-    final_duration = float(saved.get("ea", {}).get("final_duration", 0.0))
-    if final_duration > 0:
-        return replace(config, duration=final_duration)
+    log_file = run / "log.csv"
+    if not log_file.exists():
+        return config
+    with log_file.open(newline="") as file:
+        rows = list(csv.DictReader(file))
+    if rows and rows[-1].get("duration"):
+        return replace(config, duration=float(rows[-1]["duration"]))
     return config
 
 
@@ -427,16 +439,29 @@ def save_terrains(
     return tuple(paths)
 
 
+def parse_yaws(text: str) -> tuple[float, ...]:
+    """Spawn turns in degrees from a comma-separated setting such as "0,30,-30"."""
+    return tuple(float(part) for part in text.split(","))
+
+
+def terrain_yaw(yaws: tuple[float, ...], index: int) -> float:
+    """The spawn turn of terrain `index`: the yaws are cycled over the terrains."""
+    return yaws[index % len(yaws)]
+
+
 def run_terrains(
     directory: Path,
     n_terrains: int,
     world_factory: Callable[[], BaseWorld] = RuggedTerrainWorld,
     body: str = DEFAULT_BODY,
+    yaws: tuple[float, ...] = (0.0,),
 ) -> tuple[str, ...]:
     """The terrains one seed uses for its whole run, generated on first use.
 
     Each is a plain `RuggedTerrainWorld()` (a random terrain) compiled once
-    and saved as `terrain<i>.mjb` in `directory`. Every later run pointed at
+    and saved as `terrain<i>.mjb` in `directory`, or `terrain<i>_yaw<d>.mjb`
+    when the robot starts turned by d degrees on it (`terrain_yaw`, D23): the
+    saved model includes the spawned robot. Every later run pointed at
     the same directory - the other migration policies with the same seed -
     reuses the saved files, so all conditions walk exactly the same ground.
     Two runs starting at the same moment must not end up on different
@@ -449,10 +474,13 @@ def run_terrains(
     directory.mkdir(parents=True, exist_ok=True)
     paths = []
     for index in range(n_terrains):
-        path = directory / f"terrain{index}.mjb"
+        yaw = terrain_yaw(yaws, index)
+        name = f"terrain{index}_yaw{yaw:g}" if yaw else f"terrain{index}"
+        path = directory / f"{name}.mjb"
         if not path.exists():
-            partial = directory / f"terrain{index}.{os.getpid()}.partial"
-            mj.mj_saveModel(build_model(world_factory, body), str(partial), None)
+            partial = directory / f"{name}.{os.getpid()}.partial"
+            model = build_model(world_factory, body, yaw)
+            mj.mj_saveModel(model, str(partial), None)
             try:
                 os.link(partial, path)
             except FileExistsError:

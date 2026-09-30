@@ -389,7 +389,7 @@ Best fitness at the end (lower is better; standing still scores 2.0):
   reasonable settings, not to prove one shape is better. It is a development choice, not
   part of the research question.
 
-## D7. Crossover — ✅ neuron-level uniform crossover, kept after experiment 12
+## D7. Crossover — ✅ neuron-level uniform crossover, kept after experiment 12; p = 0.9 since tuning (D22)
 
 Crossover builds a child from two parents. Three candidates:
 
@@ -466,6 +466,10 @@ curve. Not significant.
 - **Limitation to state in the report:** with 5 seeds, a difference this small (about
   0.04) cannot be shown to be real. The honest claim is "crossover does not hurt and may
   help a little", not "crossover helps".
+
+**Update (D22):** on the final setup, tuning raised the crossover probability from 0.5 to
+0.9, and switching crossover off was the worst of the tuned settings. Both point the same
+way as experiment 12, now more clearly.
 
 ## D8. Mutation — ✅ Gaussian perturbation, σ = 0.05 (chosen by the pilot)
 
@@ -964,7 +968,7 @@ episode length at a different moment, so the curves could no longer be compared.
 would also force re-evaluating every elite at each switch, and very short walks favour
 lunging over gaits (the same trap as the curriculum of D16). Episodes stay a fixed 15 s.
 
-## D21. Longer walks late in the showcase run — 🧪 one run (experiment 20)
+## D21. Longer walks late in the showcase run — ❌ tried once (experiment 20), did not reach the target
 
 **Why.** Every brain so far stalls where its 15 s training walk ends: walked for 30 s,
 experiment 18's best gets to 0.36 m from the target and stops at x = 1.7. The network has
@@ -986,7 +990,8 @@ the long ones, so everything that compares fitness across generations starts afr
   `best_genotype_short.npy`, and `best_genotype.npy` becomes the best long-walk network.
 
 The log's `duration` column records each generation's walk length, `plot.py` marks the
-switch, and `replay.py` and `unseen.py` walk the brain for the final length.
+switch, and `replay.py` and `unseen.py` walk the brain for the length of the run's last
+logged generation: the long walks only if the run got as far as the switch.
 
 **Why this does not contradict D20**, which rejected walk lengths that grow with progress:
 
@@ -998,7 +1003,24 @@ switch, and `replay.py` and `unseen.py` walk the brain for the final length.
 - The re-evaluation cost D20 names is paid once: the 8 elites walk again.
 - The first phase is the proven 15 s walk, not a very short one that favours lunging.
 
-## D22. Parameter tuning — 🧪 running (experiments 19 and 19b)
+**Result (experiment 20, seed 0, crossover 0.9 from D22):** 0.82 m from the target after
+30 s, fitness 1.538; 1.11 ± 0.25 m on 20 fresh arenas. Worse than experiment 18's brain on
+the same arena (0.53 m after 15 s, 0.36 m closest in a 30 s replay).
+
+- The 15 s phase stalled at 1.10 m from about 2,500 evaluations to the switch; experiment
+  18 was at 0.59 m by 6,000 on the same arena. The switch itself worked: the same brains
+  scored 1.63 instead of 2.08 once they had 30 s.
+- After about 8,700 evaluations the best never improved again (15,000 evaluations). σ sat
+  at the 0.4 cap for the last 130 generations while the population mean got worse: once
+  a run is stuck, the stagnation rule (D19) only adds noise.
+- From about 2,000 evaluations all four islands had the same best: the best-emigrant
+  policy copies the champion around the ring until every island holds it. That is the
+  high selection pressure Cantú-Paz (2001) describes, and one reason the RQ compares
+  policies.
+- One run, so this does not show that crossover 0.9 or the switch is worse: the tuning
+  runs differ by up to 0.9 between seeds with identical settings.
+
+## D22. Parameter tuning — ✅ crossover probability 0.9, everything else kept (experiments 19 and 19b)
 
 **What was tuned so far, and where:**
 
@@ -1055,6 +1077,100 @@ consistent effect instead.
 may want a different σ). A proper tuner (irace, SPOT, REVAC; Eiben & Smit 2011) would find
 those, but needs far more runs than we can afford. It would also measure each setting on
 noisy single runs just the same.
+
+**Results** (best fitness at 6,000 evaluations, lower is better; `results/tuning/analysis/`):
+
+| Setting | Seed 100 | Seed 101 | Seed 102 | Mean ± sd | Beats base on |
+|---|---|---|---|---|---|
+| base | 1.854 | 1.724 | 1.822 | 1.800 ± 0.068 | — |
+| σ 0.02 | 2.063 | 1.905 | 1.696 | 1.888 ± 0.184 | 1 of 3 |
+| σ 0.1 | 1.922 | 2.271 | 1.922 | 2.038 ± 0.201 | 0 of 3 |
+| 4 × 10 | 2.429 | 1.352 | 2.278 | 2.020 ± 0.583 | 1 of 3 |
+| 4 × 40 | 1.281 | 1.909 | 1.889 | 1.693 ± 0.357 | 1 of 3 |
+| tournament 2 | 2.045 | 1.466 | 2.119 | 1.877 ± 0.358 | 1 of 3 |
+| tournament 5 | 2.289 | 1.342 | 1.204 | 1.612 ± 0.591 | 2 of 3 |
+| 1 elite | 1.920 | 1.728 | 1.725 | 1.791 ± 0.112 | 1 of 3 |
+| 5 elites | 1.856 | 2.004 | 1.572 | 1.811 ± 0.220 | 1 of 3 |
+| sparse mutation | 2.039 | 1.993 | 1.961 | 1.997 ± 0.039 | 0 of 3 |
+| crossover 0 | 2.243 | 1.941 | 2.004 | 2.063 ± 0.160 | 0 of 3 |
+| **crossover 0.9** | **1.763** | **0.921** | **1.421** | **1.369 ± 0.423** | **3 of 3** |
+
+**Decision: crossover probability 0.9; every other setting keeps its value.**
+
+- Crossover 0.9 is the only setting that passes the rule. It also got closest to the
+  target on every seed (0.50 ± 0.33 m left against base's 0.81 ± 0.13 m), and 2 of its 3
+  runs reached fitness 1.6, against none of base's.
+- Crossover is also the factor with the clearest trend: the mean fitness improves from
+  probability 0 (2.063) to 0.5 (1.800) to 0.9 (1.369). That fits D7: combining neurons from
+  different parents helps on this task.
+- Tournament 5 and 4 × 40 have better means than base but lose on at least one seed by a
+  lot. Their spread (sd 0.59 and 0.36) is what the rule is there to catch.
+- Nothing is significant (Friedman p = 0.24; every Mann-Whitney p ≥ 0.1 before Holm, 1.0
+  after), as expected with 3 seeds. The claim for the report is "the only consistent
+  improvement", not "a proven one".
+- Only one factor changed, so the interactions that one-factor-at-a-time tuning misses
+  cannot come from combining two winners.
+- Experiment 20 uses it. Experiment 14 must use it too, so that the research question is
+  answered with the tuned EA.
+
+## D23. Train on several situations — 🧪 pilot running (experiment 21)
+
+**The problem.** After tuning, only 1 brain of those tested reaches the target (19b's
+crossover-0.9 run on seed 101, at 16 s). Tests on the best brains (2026-09-30):
+
+| Finding | Evidence |
+|---|---|
+| Robots get stuck; they do not run out of time | Legs keep moving as hard as while walking, but the body stays put: experiment 18's brain moved 5 mm in 8 s |
+| Each brain only works on its own arena | The seed-0 brains walk about 0.7 m in 30 s on flat ground, against 1.2-1.7 m on their own arena; 1.1-1.2 m left on unseen arenas |
+| Steering is unreliable | Started turned 30° or 60° on flat ground, only the best brain still gets within 0.15 m; others drift 0.2-0.9 m sideways and stop near x = 2 |
+| 15 s is short | The one brain that arrives needs 16 s; 2 m in 15 s is faster than most gaits |
+
+The common cause: every brain trains on exactly one situation, one arena and one start
+pose, and evolution finds a trick for exactly that walk. Jakobi (1997) describes this
+for the gap between simulation and reality; the remedy is to vary what the controller
+may not rely on during evaluation.
+
+**Options:**
+
+| Option | Against | Cost per evaluation |
+|---|---|---|
+| (a) 3 arenas per brain, fitness averaged (`--n-terrains 3`) | memorising one arena, getting stuck | 3× |
+| (b) Turned starts: one arena each at 0°, +30°, −30° (`--spawn-yaws 0,30,-30`) | not steering | nothing extra with (a) |
+| (c) 20 s walks (`--duration 20`) | the time limit | 1.33× |
+| (d) Restart islands that stop improving | runs that stall early | none, but it changes the island dynamics the research question studies |
+
+**Chosen for the pilot: (a), (b) and (c)** (Emre, 2026-09-30). Not (d).
+
+- **The 3 arenas are fixed for the whole run.** They are not new every generation as in
+  experiment 1 (D10), so a brain's score means the same in every generation, elites keep
+  their scores, and the stagnation rule (D19) still works.
+- **Turned starts use ARIEL's own `spawn(rotation=...)` argument**, the public API, like
+  the spawn position we already pass (Emre agreed, 2026-09-30). No ARIEL code changes. The
+  turn is saved in the arena's file (`terrain1_yaw30.mjb`), so a turned arena never mixes
+  with an unturned one.
+- Arena 0 is unturned and is the same arena the other runs of that seed use.
+
+**Design** (`experiments/21_robustness_pilot.sh`): 2 × 2 on seeds 100-102 and their
+tuning arenas, 6,000 evaluations each; base is 19b's crossover-0.9 runs (1 arena, 15 s).
+
+**Test:** every brain walks 20 s from each of 5 turns (0°, ±30°, and the untrained ±60°),
+each turn on its own 20 unseen arenas: 100 walks, the same 100 for every brain.
+`unseen.py --yaws ... --duration 20`. All brains get the same 20 s at test time, so a 15 s
+brain is not penalised for its shorter training walk. Each turn has different arenas, so a
+per-turn comparison (e.g. ±60° against 0°) mixes the turn with the arenas' difficulty; the
+decision uses the pooled share only.
+
+**Decision rule, fixed before the results:** a change is adopted if it raises the share of
+the 100 unseen walks that reach the target on all 3 seeds and on the mean. The unseen
+distance is the tie-breaker.
+
+**Cost and limits:**
+
+- With 3 arenas one evaluation is 3 walks, so at the same number of evaluations these runs
+  simulate 3× as much. If they win, some of that may be the extra simulation; the
+  question here is whether training can make brains reliable at all.
+- Experiment 14 would cost about 3× (4× with 20 s). At 6,000 instead of 12,000
+  evaluations that is about 16-22 h instead of 11 h.
 
 ## References (to verify when writing the report)
 
