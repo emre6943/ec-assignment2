@@ -1113,7 +1113,7 @@ noisy single runs just the same.
 - Experiment 20 uses it. Experiment 14 must use it too, so that the research question is
   answered with the tuned EA.
 
-## D23. Train on several situations — 🧪 pilot running (experiment 21)
+## D23. Train on several situations — ❌ tried in experiment 21, nothing adopted
 
 **The problem.** After tuning, only 1 brain of those tested reaches the target (19b's
 crossover-0.9 run on seed 101, at 16 s). Tests on the best brains (2026-09-30):
@@ -1171,6 +1171,32 @@ distance is the tie-breaker.
   question here is whether training can make brains reliable at all.
 - Experiment 14 would cost about 3× (4× with 20 s). At 6,000 instead of 12,000
   evaluations that is about 16-22 h instead of 11 h.
+
+**Results** (`results/robustness/unseen.log`; 100 unseen walks per brain, 20 s each):
+
+| Setting | Reached the target (seeds 100 / 101 / 102) | Mean distance left | Within 0.5 m |
+|---|---|---|---|
+| base (1 arena, 15 s) | 0% / 3% / 0% | 1.02 m | 13% |
+| walk20 (1 arena, 20 s) | 0% / 0% / 0% | 1.35 m | 0% |
+| arenas3 (3 turned arenas, 15 s) | 0% / 0% / 0% | 1.11 m | 4% |
+| arenas3_walk20 (both) | 0% / 0% / 0% | 1.22 m | 0% |
+
+**Decision: nothing is adopted; the setup stays 1 arena, 15 s (D22).** No setting beat base
+on any seed, let alone all three.
+
+- On unseen arenas no brain reaches the target reliably: 3 of 1,200 walks arrived, all
+  from base's seed-101 brain. That brain is also the best generaliser (0.59 m median
+  unseen, 37% of walks within 0.5 m) and the only one that reaches its own arena (0.10 m).
+- Training on 3 turned arenas did make one brain nearly insensitive to the turn (arenas3
+  seed 100: 1.04 / 1.01 / 1.06 m from 0°, ±30°, ±60°), but it walked worse overall. At the
+  same number of evaluations, the harder task leaves brains less far along.
+- 20 s training walks made nothing better, with 1 arena or with 3.
+- arenas3_walk20's seed-101 brain failed 9 of its 100 unseen walks (the failed score:
+  the simulation went unstable or the robot left the world).
+- **For the report:** the gap between the training arena and unseen arenas is the main
+  limitation of this controller (a reactive network without a CPG, D17) and budget.
+  Remedies that help in the literature (Jakobi 1997) did not help at 6,000 evaluations;
+  they may need a far larger budget than this assignment allows.
 
 ## References (to verify when writing the report)
 
