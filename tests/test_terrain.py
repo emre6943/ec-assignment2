@@ -54,3 +54,22 @@ def test_olympic_spawn_and_vision_use_the_real_ground(
     )
     readings = vision(model, data, model.body(CORE_BODY).id, ground_geoms(model))
     assert 0.0 < readings[0] * RAY_MAX_RANGE < 1.0  # the down ray hits the start
+
+
+def test_ariel_spawn_settles_like_ours_on_olympic_arena(
+    olympic: tuple[mj.MjModel, mj.MjData],
+) -> None:
+    """D2a: on the flat start, ARIEL's floor correction starts the robot 1 cm
+    lower than our spawn, and after a second both rest at the same height."""
+    ours, _ = olympic
+    ariel = build_model(OlympicArena, "spider_8", ariel_spawn=True)
+    heights = []
+    for model in (ours, ariel):
+        data = mj.MjData(model)
+        mj.mj_forward(model, data)
+        start = data.xpos[model.body(CORE_BODY).id][2]
+        mj.mj_step(model, data, nstep=int(1.0 / model.opt.timestep))
+        heights.append((start, data.xpos[model.body(CORE_BODY).id][2]))
+    (ours_start, ours_rest), (ariel_start, ariel_rest) = heights
+    assert ariel_start == pytest.approx(ours_start - 0.01, abs=1e-3)
+    assert ariel_rest == pytest.approx(ours_rest, abs=1e-3)

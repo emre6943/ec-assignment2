@@ -57,6 +57,7 @@ from sensors import CORE_BODY, HALF_PI, n_inputs, ray_set, read_inputs
 from terrain import CORE_ABOVE_LOWEST_POINT, ground_geoms, ground_height, spawn_height
 
 SPAWN_XY: tuple[float, float] = (0.0, 0.0)
+TEMPLATE_SPAWN_Z: float = 0.1  # the template's SPAWN_POS height
 TARGET_XY: npt.NDArray[np.float64] = np.array([2.0, 0.0])
 
 # Given to a controller that blew up (NaN) or fell out of the world. The robot
@@ -123,22 +124,31 @@ def build_model(
     world_factory: Callable[[], BaseWorld] = RuggedTerrainWorld,
     body: str = DEFAULT_BODY,
     yaw: float = 0.0,
+    ariel_spawn: bool = False,
 ) -> mj.MjModel:
     """Compile `body` on a newly generated world (a new random terrain).
 
     `yaw` turns the robot at spawn by that many degrees about the vertical
     (left for positive), through ARIEL's own `spawn(rotation=...)`; at 0 the
     target lies straight ahead (decision D23).
+
+    `ariel_spawn` places the robot as the template does: ARIEL's own floor
+    correction, which puts its lowest point 1 cm above height 0. That is right
+    on OlympicArena's flat start; on RuggedTerrainWorld it buries the robot, so
+    by default we spawn 2 cm above the real ground instead (decision D2a).
     """
     mj.set_mjcb_control(None)  # MuJoCo's control callback is global; keep it off
     world = world_factory()
     robot = build_body(body)
-    spawn_z = spawn_height(world.spec, body_info(body).reach, *SPAWN_XY)
+    if ariel_spawn:
+        spawn_z = TEMPLATE_SPAWN_Z  # ARIEL's correction replaces it anyway
+    else:
+        spawn_z = spawn_height(world.spec, body_info(body).reach, *SPAWN_XY)
     world.spawn(
         robot.spec,
         position=[*SPAWN_XY, spawn_z],
         rotation=(0.0, 0.0, yaw) if yaw else None,
-        correct_collision_with_floor=False,
+        correct_collision_with_floor=ariel_spawn,
     )
     model = world.spec.compile()
     if model.nu != body_info(body).hinges:
@@ -449,19 +459,36 @@ def terrain_yaw(yaws: tuple[float, ...], index: int) -> float:
     return yaws[index % len(yaws)]
 
 
+def terrain_name(index: int, yaw: float, ariel_spawn: bool = False) -> str:
+    """`terrain<i>`, plus `_yaw<d>` for a turned start and `_arielspawn` for
+    ARIEL's own spawn. The turn is written exactly, so two different starts
+    never share a file."""
+    name = f"terrain{index}"
+    if yaw:
+        label = f"{yaw:g}"
+        if float(label) != yaw:
+            label = repr(yaw)
+        name += f"_yaw{label}"
+    if ariel_spawn:
+        name += "_arielspawn"
+    return name
+
+
 def run_terrains(
     directory: Path,
     n_terrains: int,
     world_factory: Callable[[], BaseWorld] = RuggedTerrainWorld,
     body: str = DEFAULT_BODY,
     yaws: tuple[float, ...] = (0.0,),
+    ariel_spawn: bool = False,
 ) -> tuple[str, ...]:
     """The terrains one seed uses for its whole run, generated on first use.
 
     Each is a plain `RuggedTerrainWorld()` (a random terrain) compiled once
     and saved as `terrain<i>.mjb` in `directory`, or `terrain<i>_yaw<d>.mjb`
-    when the robot starts turned by d degrees on it (`terrain_yaw`, D23): the
-    saved model includes the spawned robot. Every later run pointed at
+    when the robot starts turned by d degrees on it (`terrain_yaw`, D23), with
+    `_arielspawn` added for ARIEL's own spawn (D2a): the saved model includes
+    the spawned robot. Every later run pointed at
     the same directory - the other migration policies with the same seed -
     reuses the saved files, so all conditions walk exactly the same ground.
     Two runs starting at the same moment must not end up on different
@@ -475,11 +502,11 @@ def run_terrains(
     paths = []
     for index in range(n_terrains):
         yaw = terrain_yaw(yaws, index)
-        name = f"terrain{index}_yaw{yaw:g}" if yaw else f"terrain{index}"
+        name = terrain_name(index, yaw, ariel_spawn)
         path = directory / f"{name}.mjb"
         if not path.exists():
             partial = directory / f"{name}.{os.getpid()}.partial"
-            model = build_model(world_factory, body, yaw)
+            model = build_model(world_factory, body, yaw, ariel_spawn)
             mj.mj_saveModel(model, str(partial), None)
             try:
                 os.link(partial, path)

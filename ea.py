@@ -130,8 +130,12 @@ class EAConfig:
     n_terrains: int = 1
     # Degrees the robot starts turned by, cycled over the terrains (decision
     # D23): "0,30,-30" with 3 terrains starts one walk facing the target and
-    # two turned away from it, so a brain has to steer.
+    # two turned away from it, so a brain has to steer. On the command line, a
+    # list that starts with a minus needs "=": --spawn-yaws=-30,30.
     spawn_yaws: str = "0"
+    # Place the robot with ARIEL's own floor correction, exactly as the
+    # template does, instead of 2 cm above the real ground (decision D2a).
+    ariel_spawn: bool = False
 
     # Curriculum and early stopping (decision D16); both off by default. Over
     # the first `curriculum_generations` generations, the reward for moving at
@@ -180,7 +184,7 @@ def check_config(config: "EAConfig") -> None:
     else:
         if len(yaws) > config.n_terrains:
             problems.append("spawn_yaws has more values than there are terrains")
-        if any(abs(yaw) > 180 for yaw in yaws):
+        if not all(np.isfinite(yaw) and abs(yaw) <= 180 for yaw in yaws):
             problems.append("spawn_yaws must lie between -180 and 180 degrees")
     if config.stall_generations < 0:
         problems.append("stall_generations must be 0 (off) or more")
@@ -284,6 +288,7 @@ class Experiment:
                 world_factory,
                 sim.body,
                 parse_yaws(config.spawn_yaws),
+                config.ariel_spawn,
             )
         self.rng = operator_rng(config.seed)
 
@@ -505,7 +510,12 @@ class Experiment:
         else:
             yaws = parse_yaws(self.config.spawn_yaws)
             models = [
-                build_model(self.world_factory, self.sim.body, terrain_yaw(yaws, i))
+                build_model(
+                    self.world_factory,
+                    self.sim.body,
+                    terrain_yaw(yaws, i),
+                    self.config.ariel_spawn,
+                )
                 for i in range(self.config.n_terrains)
             ]
             paths = save_terrains(models, self.generation_terrain_dir, self.generation)

@@ -20,6 +20,7 @@ from simulate import (
     is_upside_down,
     leg_imbalance,
     run_terrains,
+    terrain_name,
     walk,
     work_imbalance,
 )
@@ -101,6 +102,14 @@ def test_run_terrains_reuses_existing_files(tmp_path: Path) -> None:
     assert first == second
     assert (tmp_path / "terrain0.mjb").stat().st_mtime_ns == stamp
     assert sorted(p.name for p in tmp_path.iterdir()) == ["terrain0.mjb"]
+
+
+def test_terrain_names_keep_the_exact_turn() -> None:
+    assert terrain_name(2, 0.0) == "terrain2"
+    assert terrain_name(1, -30.0) == "terrain1_yaw-30"
+    assert terrain_name(1, 30.0000001) != terrain_name(1, 30.0)
+    assert terrain_name(0, 0.0, ariel_spawn=True) == "terrain0_arielspawn"
+    assert terrain_name(1, 30.0, ariel_spawn=True) == "terrain1_yaw30_arielspawn"
 
 
 def test_run_terrains_turns_the_robot_per_terrain(tmp_path: Path) -> None:

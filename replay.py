@@ -5,6 +5,8 @@
     uv run --project ../ariel python replay.py results/best/seed0 --new-terrain  # unseen ground
     uv run --project ../ariel python replay.py results/best/seed0 --flat         # flat ground
     uv run --project ../ariel python replay.py results/best/seed0 --duration 30  # walk longer
+    uv run --project ../ariel python replay.py results/best/seed0 --terrain 1    # 2nd arena
+    uv run --project ../ariel python replay.py results/best/seed0 --flat --yaw 30  # turned
 
 By default the robot walks the terrain it was evolved on (saved with the run).
 `--new-terrain` builds its world anew - a random terrain (RuggedTerrainWorld)
@@ -77,22 +79,42 @@ def main() -> None:
     parser.add_argument(
         "--duration", type=float, help="seconds to walk (default: the run's walks)"
     )
+    parser.add_argument(
+        "--terrain", type=int, default=0, help="which training terrain (default: 0)"
+    )
+    parser.add_argument(
+        "--yaw",
+        type=float,
+        default=0.0,
+        help="degrees the robot starts turned by, with --flat or --new-terrain (D23)",
+    )
     args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be positive")
+    if not (np.isfinite(args.yaw) and abs(args.yaw) <= 180):
+        parser.error("--yaw must lie between -180 and 180 degrees")
 
     run_config = json.loads((args.run / "config.json").read_text())
     config = final_sim_config(args.run)
-    if args.duration:
+    if args.duration is not None:
         config = replace(config, duration=args.duration)
     genotype = np.load(args.run / "best_genotype.npy")
     training_terrains = run_config.get("terrains", [])
+    ariel_spawn = run_config.get("ea", {}).get("ariel_spawn", False)
     if args.flat:
-        model = build_model(SimpleFlatWorld, config.body)
+        model = build_model(SimpleFlatWorld, config.body, args.yaw, ariel_spawn)
     elif args.new_terrain or not training_terrains:
         worlds = {factory.__name__: factory for factory in WORLDS.values()}
         world = run_config.get("world", RuggedTerrainWorld.__name__)
-        model = build_model(worlds[world], config.body)
+        model = build_model(worlds[world], config.body, args.yaw, ariel_spawn)
+    elif args.yaw:
+        parser.error(
+            "--yaw needs --flat or --new-terrain: a training terrain has its own"
+        )
+    elif not 0 <= args.terrain < len(training_terrains):
+        parser.error(f"--terrain must be 0 to {len(training_terrains) - 1}")
     else:
-        model = mj.MjModel.from_binary_path(training_terrains[0])
+        model = mj.MjModel.from_binary_path(training_terrains[args.terrain])
     data = mj.MjData(model)
 
     mj.set_mjcb_control(make_controller(genotype, config, model))

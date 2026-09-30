@@ -18,13 +18,13 @@ Status legend:
 |---|---|---|---|
 | D1 | Body | ✅ | `john_set.spider_8` since 2026-09-29 (was `spider_16`, which cannot lift itself; D17) |
 | D2 | World | ✅ | `OlympicArena` since 2026-09-29, ARIEL defaults (was `RuggedTerrainWorld`: too steep to walk on; D17) |
-| D2a | Spawn height on rugged terrain | 🟡 **awaiting OK** | Spawn above the ground, `correct_collision_with_floor=False` |
+| D2a | Spawn height | ✅ | Experiment 14 uses ARIEL's own spawn, as in the template (`--ariel-spawn`); earlier runs spawned 2 cm above the real ground, which rests in the same pose on OlympicArena |
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
 | D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed |
 | D4 | Controller outputs | 🟡 | One output per hinge (8 for spider_8; 16 for spider_16), direct position control |
-| D5 | Controller inputs | ✅ | 26 for spider_8 (34 for spider_16): joint angles + clock + target vector + tilt + 10 vision rays |
-| D6 | Network shape | ✅ (pilot) | Fixed MLP, one hidden layer of 16; evolve weights only (568 weights for spider_8, 832 for spider_16) |
-| D7 | Crossover | ✅ (experiment 12) | Neuron-level uniform crossover, p = 0.5; kept after testing it against mutation only |
+| D5 | Controller inputs | ✅ | 21 for spider_8: joint angles + clock + target vector + tilt + the 5 near vision rays (experiment 18) |
+| D6 | Network shape | ✅ (pilot) | Fixed MLP, one hidden layer of 16; evolve weights only (488 weights for spider_8 with 5 rays) |
+| D7 | Crossover | ✅ (experiments 12, 19b) | Neuron-level uniform crossover, p = 0.9 since tuning (was 0.5) |
 | D8 | Mutation | ✅ (pilot) | Gaussian perturbation of every weight, σ = 0.05 |
 | D9 | Selection | 🟡 | Tournament (parents) + generational with elitism (survivors) |
 | D10 | Terrain and noisy fitness | ✅ | One fixed terrain per seed, shared by all conditions with that seed |
@@ -34,10 +34,13 @@ Status legend:
 | D14 | Final evaluation | 🟡 | Best controllers re-tested on unseen terrains; for OlympicArena after experiment 14 |
 | D15 | Fitness function | ✅ (weights 🟡) | Distance + penalties for the core touching the ground and for being upside down |
 | D16 | Curriculum and early stopping | ❌ rejected | Lost to the plain setup on one seed; kept behind flags, off by default |
-| D17 | Rhythm options and body/world rethink | ✅ | spider_8 on OlympicArena; rhythmic start (`--clock-boost 3`) on, tempo gene dropped |
-| D18 | Gait terms in the fitness | 🧪 piloting (exp. 16-17) | Contact penalty 1.0, carry term (4 cm line, weight 1.0), motor-work balance across legs (0.5) |
-| D19 | Stagnation rule for the mutation step | 🧪 piloting (exp. 16-17) | An island's σ doubles after 15 generations without progress; resets on progress |
-| D20 | Rewarding speed | 🧪 piloting (exp. 16-17) | + 0.5 × the walk-averaged distance to the target; walks end on arrival; episodes stay 15 s |
+| D17 | Rhythm options and body/world rethink | ✅ | spider_8 on OlympicArena; clock boost 1 since experiment 18 (was 3); tempo gene dropped |
+| D18 | Gait terms in the fitness | ✅ (exp. 16-18) | Contact penalty 1.0, carry term (4 cm line, weight 1.0), motor-work balance across legs (0.5) |
+| D19 | Stagnation rule for the mutation step | ✅ (exp. 16-18) | An island's σ doubles after 15 generations without progress (up to 0.4); resets on progress |
+| D20 | Rewarding speed | ✅ (exp. 16-18) | + 0.5 × the walk-averaged distance to the target; walks end on arrival; episodes stay 15 s |
+| D21 | Longer walks late in a run | ❌ (experiment 20) | Showcase only: 15 s then 30 s walks; did not reach the target |
+| D22 | Parameter tuning | ✅ (experiments 19, 19b) | Crossover probability 0.9; σ, population, tournament, elites and dense mutation kept |
+| D23 | Train on several situations | ❌ (experiment 21) | 3 arenas, turned starts and 20 s walks tried; nothing reached unseen targets, nothing adopted |
 
 ---
 
@@ -120,7 +123,7 @@ The terrain scatters a controller's score by about ±0.12–0.14 m. That is **la
 what weak controllers achieve**. Averaging over *k* terrains shrinks the scatter by √*k*:
 about 0.08 m at *k* = 3 and 0.05 m at *k* = 10.
 
-## D2a. Spawn height on rugged terrain — 🟡 (a bug fix in our code; awaiting the team's OK)
+## D2a. Spawn height — ✅ ARIEL's own spawn for experiment 14 (ours on rugged terrain)
 
 **The template's spawn buries the robot in rugged terrain.**
 
@@ -141,7 +144,20 @@ is an argument of ARIEL's public `spawn()` call, like the spawn position the tem
 leaves to us.
 
 - It conflicts with the team rule in D2b ("no settings away from ARIEL's defaults").
-- **Recommendation: keep it**, and state it in Methods with the evidence above. Awaiting the team's OK.
+
+**Resolution (Emre, 2026-09-30): experiment 14 uses ARIEL's own spawn** (`--ariel-spawn`:
+the template's `position=[0, 0, 0.1]`, `correct_collision_with_floor=True`).
+
+- The problem above only exists on rugged ground. OlympicArena's start is flat at height
+  0, which is exactly what ARIEL's correction assumes.
+- Measured on OlympicArena: ARIEL's spawn starts the core at 8.5 cm, ours at 9.5 cm, and
+  after 1 s both rest at 7.5 cm (`test_ariel_spawn_settles_like_ours_on_olympic_arena`).
+  Tuning and the pilots (experiments 15-21) used ours; the robot ends in the same pose,
+  so their conclusions carry over.
+- So the final experiment passes no setting away from ARIEL's defaults beyond what the
+  template itself passes. Experiments 1-13 on rugged terrain keep our spawn.
+- An arena built with ARIEL's spawn includes the robot, so it is saved under its own name
+  (`terrain0_arielspawn.mjb`), and the unseen test arenas likewise.
 
 ## D2b. Bump height — ✅ ARIEL's default, untouched
 
@@ -256,7 +272,7 @@ instead of every step (500 Hz). The servos move the joints in between.
   0.61 s per 15 s episode), because the physics itself dominates.
 - **Rhythm:** a 1 Hz gait still gets 50 updates per stride.
 
-## D5. Controller inputs — ✅ 34 inputs including vision (`sensors.py`)
+## D5. Controller inputs — ✅ 21 inputs for spider_8 with the 5 near rays (`sensors.py`)
 
 The network can only react to what it is told. The spec warns about this directly: *a
 controller with no signal telling it where the target is, or nothing to drive rhythmic
@@ -836,7 +852,7 @@ CPG; nothing forbids it, but it is not worth the risk:
 
 The clock therefore stays a fixed 1 Hz input. The tempo code stays behind its flag, off.
 
-## D18. Gait terms in the fitness — 🧪 piloting (experiments 16-17)
+## D18. Gait terms in the fitness — ✅ in the final setup (experiments 16-18)
 
 **Why.** The best brain of experiment 15 reaches 0.84 m from the target, but on video it
 does not walk like a spider (measured over its 15 s walk):
@@ -910,7 +926,7 @@ A robot could game the leg term by jiggling a useless leg, so we check the video
 last time we added posture terms (experiment 3) they did not help, but that was on noisy
 rugged terrain. Every condition of the research question uses the same fitness.
 
-## D19. Stagnation rule for the mutation step — 🧪 piloting (experiments 16-17)
+## D19. Stagnation rule for the mutation step — ✅ in the final setup (experiments 16-18)
 
 **Why.** Experiment 15 stopped improving after about 9,000 evaluations and never moved
 again (225 generations), with the genotype spread collapsed from 14 to about 1.5. The
@@ -938,7 +954,7 @@ lets the children search further away. The same rule runs in every condition; mi
 can reset an island's σ by bringing in a better individual, which is part of what
 migration does in this EA and belongs in the Discussion.
 
-## D20. Rewarding speed — 🧪 piloting (experiments 16-17)
+## D20. Rewarding speed — ✅ in the final setup (experiments 16-18)
 
 **Why.** The fitness so far only looks at where the robot ends. A robot that closes 1 m
 in 10 s and one that needs all 15 s score the same, and so do a robot that arrives after
@@ -1155,7 +1171,8 @@ tuning arenas, 6,000 evaluations each; base is 19b's crossover-0.9 runs (1 arena
 
 **Test:** every brain walks 20 s from each of 5 turns (0°, ±30°, and the untrained ±60°),
 each turn on its own 20 unseen arenas: 100 walks, the same 100 for every brain.
-`unseen.py --yaws ... --duration 20`. All brains get the same 20 s at test time, so a 15 s
+`unseen.py --yaws ... --duration 20` writes them to `unseen_yaws0_30_-30_60_-60_20s.json`,
+so they never replace the standard test (`unseen.json`) that `analyze.py` reads. All brains get the same 20 s at test time, so a 15 s
 brain is not penalised for its shorter training walk. Each turn has different arenas, so a
 per-turn comparison (e.g. ±60° against 0°) mixes the turn with the arenas' difficulty; the
 decision uses the pooled share only.

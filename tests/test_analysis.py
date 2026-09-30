@@ -16,7 +16,7 @@ from analyze import (
     summary_markdown,
 )
 from simulate import Score, SimConfig
-from unseen import load_sim_config, summarise
+from unseen import load_sim_config, result_file_name, summarise
 
 CURVE = pd.DataFrame(
     {
@@ -97,6 +97,9 @@ def test_unseen_skips_runs_it_cannot_read(tmp_path: Path) -> None:
     (tmp_path / "config.json").write_text(json.dumps({"sim": {"duration": 3.0}}))
     # A config that does not record its body is from experiments 1-12: spider_16.
     assert load_sim_config(tmp_path) == SimConfig(duration=3.0, body="spider_16")
+    # A log with a header only (a run stopped before its first generation).
+    (tmp_path / "log.csv").write_text("generation,evaluations,duration\n")
+    assert load_sim_config(tmp_path) == SimConfig(duration=3.0, body="spider_16")
 
 
 def test_unseen_summary_statistics() -> None:
@@ -106,3 +109,13 @@ def test_unseen_summary_statistics() -> None:
     assert result["distance_mean"] == pytest.approx(1.5)
     assert result["distance_std"] == pytest.approx(0.5)
     assert result["fitness"] == pytest.approx([1.0, 2.0 + config.ground_contact_weight])
+    assert result["reached"] == 0.0
+    arrived = Score(0.05, 1.95, 0.0, 0.0, 8.0)  # stop_at_target ended the walk
+    assert summarise([*scores, arrived], config)["reached"] == pytest.approx(1 / 3)
+
+
+def test_a_special_unseen_test_gets_its_own_file() -> None:
+    """Only the standard test is `unseen.json`, the file analyze.py reads (D23)."""
+    assert result_file_name([0.0], None) == "unseen.json"
+    assert result_file_name([0.0, 30.0, -30.0], 20.0) == "unseen_yaws0_30_-30_20s.json"
+    assert result_file_name([0.0], 20.0) == "unseen_20s.json"

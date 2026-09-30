@@ -148,6 +148,7 @@ def test_operator_stream_is_independent_of_ariels_mutation_stream() -> None:
         ("spawn_yaws", "north"),
         ("spawn_yaws", "0,30"),  # more turns than the one terrain
         ("spawn_yaws", "270"),
+        ("spawn_yaws", "nan"),
     ],
 )
 def test_impossible_settings_are_rejected(setting: str, value: int | str) -> None:

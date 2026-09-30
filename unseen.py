@@ -17,7 +17,9 @@ each turn gets its own `N_TEST_TERRAINS` test arenas, so `--yaws 0 30 -30`
 means 60 unseen walks. `--duration` overrides the walk length, so brains
 trained with different walk lengths can be tested on the same one.
 
-For each run it writes `unseen.json` next to the run's other files:
+For each run it writes `unseen.json` next to the run's other files, or, with
+`--yaws` or `--duration`, a file named after them (`unseen_yaws0_30_20s.json`),
+so a special test never overwrites the standard one that `analyze.py` reads:
 
     training   the score on the run's own training terrain(s)
     unseen     the score on each test terrain, and their mean and spread
@@ -75,6 +77,16 @@ def load_sim_config(run: Path) -> SimConfig | None:
         return None
 
 
+def result_file_name(yaws: list[float], duration: float | None) -> str:
+    """`unseen.json` for the standard test (D14), else a name that says which."""
+    parts = []
+    if yaws != [0.0]:
+        parts.append("yaws" + "_".join(f"{yaw:g}" for yaw in yaws))
+    if duration is not None:
+        parts.append(f"{duration:g}s")
+    return "_".join(["unseen", *parts]) + ".json"
+
+
 def summarise(scores: list[Score], config: SimConfig) -> dict[str, object]:
     """Distances and fitness per terrain, plus their mean and standard deviation.
 
@@ -111,6 +123,11 @@ def main() -> None:
         "--duration", type=float, help="seconds to walk (default: the run's walks)"
     )
     args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be positive")
+    if not all(np.isfinite(yaw) and abs(yaw) <= 180 for yaw in args.yaws):
+        parser.error("--yaws must lie between -180 and 180 degrees")
+    result_name = result_file_name(args.yaws, args.duration)
 
     with mp.get_context("spawn").Pool(args.workers) as pool:
         for run in args.runs:
@@ -118,7 +135,7 @@ def main() -> None:
             if config is None or not (run / "best_genotype.npy").exists():
                 print(f"{run}: skipped (no config, older format, or no best genotype)")
                 continue
-            if args.duration:
+            if args.duration is not None:
                 config = replace(config, duration=args.duration)
             genotype = np.load(run / "best_genotype.npy").tolist()
             saved = json.loads((run / "config.json").read_text())
@@ -151,6 +168,7 @@ def main() -> None:
                     WORLDS[world],
                     config.body,
                     (yaw,),
+                    saved.get("ea", {}).get("ariel_spawn", False),
                 )
                 yaws += [yaw] * N_TEST_TERRAINS
             tasks = [(genotype, (path,), config, None) for path in training]
@@ -164,7 +182,7 @@ def main() -> None:
                 "yaws": yaws,
                 "duration": config.duration,
             }
-            (run / "unseen.json").write_text(json.dumps(result, indent=2))
+            (run / result_name).write_text(json.dumps(result, indent=2))
             unseen = result["unseen"]
             print(
                 f"{run}: training distance "
