@@ -15,8 +15,8 @@
 #   EA               4 islands x 20; per island and generation 2 elites and
 #                    18 children; tournament of 3; neuron-level crossover with
 #                    probability 0.9 (D7, D22); Gaussian mutation sigma 0.05 on
-#                    every weight (D8); sigma doubles, up to 0.4, on an island
-#                    stuck for 15 generations (D19); 2 migrants every 10
+#                    every weight (D8), kept fixed: the stagnation rule was
+#                    dropped after experiment 22 (D19); 2 migrants every 10
 #                    generations around a ring (D11); 12,000 evaluations (D12)
 #
 # Six conditions x five seeds:
@@ -44,7 +44,7 @@ run=(uv run --project ../ariel python run.py --skip-done --seeds "${seeds[@]}"
     --vision-rays near --clock-boost 1
     --ground-contact-weight 1.0 --low-body-weight 1.0 --carry-height 0.04
     --work-imbalance-weight 0.5 --leg-imbalance-weight 0
-    --speed-weight 0.5 --stop-at-target --stall-generations 15
+    --speed-weight 0.5 --stop-at-target
     --crossover-probability 0.9 --ariel-spawn --max-evaluations 12000)
 
 for policy in best worst random none; do

@@ -36,7 +36,7 @@ Status legend:
 | D16 | Curriculum and early stopping | ❌ rejected | Lost to the plain setup on one seed; kept behind flags, off by default |
 | D17 | Rhythm options and body/world rethink | ✅ | spider_8 on OlympicArena; clock boost 1 since experiment 18 (was 3); tempo gene dropped |
 | D18 | Gait terms in the fitness | ✅ (exp. 16-18) | Contact penalty 1.0, carry term (4 cm line, weight 1.0), motor-work balance across legs (0.5) |
-| D19 | Stagnation rule for the mutation step | ✅ (exp. 16-18) | An island's σ doubles after 15 generations without progress (up to 0.4); resets on progress |
+| D19 | Stagnation rule for the mutation step | ❌ dropped (exp. 22) | Tested alone: helped 1 seed, hurt 1, no effect on 1; same mean. Off in experiment 14 |
 | D20 | Rewarding speed | ✅ (exp. 16-18) | + 0.5 × the walk-averaged distance to the target; walks end on arrival; episodes stay 15 s |
 | D21 | Longer walks late in a run | ❌ (experiment 20) | Showcase only: 15 s then 30 s walks; did not reach the target |
 | D22 | Parameter tuning | ✅ (experiments 19, 19b) | Crossover probability 0.9; σ, population, tournament, elites and dense mutation kept |
@@ -926,7 +926,7 @@ A robot could game the leg term by jiggling a useless leg, so we check the video
 last time we added posture terms (experiment 3) they did not help, but that was on noisy
 rugged terrain. Every condition of the research question uses the same fitness.
 
-## D19. Stagnation rule for the mutation step — ✅ in the final setup (experiments 16-18)
+## D19. Stagnation rule for the mutation step — ❌ dropped after experiment 22 (used in 16-21)
 
 **Why.** Experiment 15 stopped improving after about 9,000 evaluations and never moved
 again (225 generations), with the genotype spread collapsed from 14 to about 1.5. The
@@ -953,6 +953,34 @@ elites are always kept, so a wide step cannot lose the best gait found so far: i
 lets the children search further away. The same rule runs in every condition; migration
 can reset an island's σ by bringing in a better individual, which is part of what
 migration does in this EA and belongs in the Discussion.
+
+**Test on its own (experiment 22, 2026-09-30):** the rule had never been tested alone, and
+it mixes with the research question (an immigrant that improves an island resets that
+island's σ). Experiment 19b's crossover-0.9 runs (rule on) against the same runs with the
+rule off, seeds 100-102, 6,000 evaluations. Rule fixed before the results: the stagnation
+rule stays only if the runs with it beat the runs without it on all 3 seeds and on the mean.
+
+| Seed | Rule on | Rule off | Island-generations with a widened σ (rule on) |
+|---|---|---|---|
+| 100 | 1.763 | **1.531** | 72 of 336, up to 0.2 |
+| 101 | **0.921** | 1.091 | 32 of 336, up to 0.2 |
+| 102 | 1.421 | 1.421 | 47 of 336, up to 0.4 |
+| mean ± sd | 1.369 ± 0.423 | **1.348 ± 0.229** | |
+
+Best fitness at 6,000 evaluations, lower is better. Runs below 1.6: 2 of 3 with the rule,
+3 of 3 without. Mann-Whitney p = 1.0.
+
+**Decision: the rule is dropped (`--stall-generations 0`, the default).**
+
+- It helped on one seed (101: the run whose brain reaches the target), hurt on another
+  (100), and did nothing on the third: on seed 102 σ widened to 0.4 on some islands, yet
+  the run ended exactly where the run without the rule did, because no wider step found
+  anything better.
+- The means are the same within noise, so the rule fails the test fixed in advance, and
+  the simpler EA wins the tie.
+- Dropping it also takes it out of the research question: migration no longer acts
+  through resetting σ, so a difference between policies is migration's alone.
+- The code stays (`ea.next_sigma`, off at 0), so experiments 16-21 remain reproducible.
 
 ## D20. Rewarding speed — ✅ in the final setup (experiments 16-18)
 
