@@ -89,5 +89,11 @@ def test_near_rays_are_down_plus_the_four_steep_ones(
     near = vision(model, data, core, ground_geoms(model), rays="near")
     np.testing.assert_array_equal(near, every[[DOWN, 6, 7, 8, 9]])
     assert n_inputs(vision=True, hinges=8, rays="near") == 8 + 8 + 5
+    near3 = vision(model, data, core, ground_geoms(model), rays="near3")
+    np.testing.assert_array_equal(near3, every[[DOWN, 6, 8]])  # ahead, behind
+    down = vision(model, data, core, ground_geoms(model), rays="down")
+    np.testing.assert_array_equal(down, every[[DOWN]])
+    assert n_inputs(vision=True, hinges=8, rays="near3") == 8 + 8 + 3
+    assert n_inputs(vision=False, hinges=8, rays="near") == 8 + 8
     with pytest.raises(ValueError, match="unknown ray set"):
         n_inputs(vision=True, rays="many")

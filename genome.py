@@ -24,7 +24,7 @@ import numpy as np
 
 # Local libraries
 from network import Genotype, NetworkShape, random_genotype, unpack
-from operators import neuron_crossover
+from operators import blx_crossover, neuron_crossover, weight_crossover
 
 TEMPO_MIN_HZ: float = 0.25
 TEMPO_MAX_HZ: float = 4.0
@@ -88,11 +88,25 @@ def crossover(
     shape: NetworkShape,
     evolve_tempo: bool,
     rng: np.random.Generator,
+    kind: str = "neuron",
 ) -> Genotype:
-    """Neuron-level crossover of the weights; the tempo gene from either parent."""
+    """Crossover of the weights; the tempo gene from either parent.
+
+    `kind` (`ea.EAConfig.crossover`, D7): "neuron" (and "headless", whose second
+    parent the EA replaces by a random genotype) keeps neurons whole, "weight"
+    mixes single weights, "blx" blends them.
+    """
     weights_a, _ = split(parent_a, shape, evolve_tempo)
     weights_b, _ = split(parent_b, shape, evolve_tempo)
-    child = neuron_crossover(weights_a, weights_b, shape, rng)
+    if kind in ("neuron", "headless"):
+        child = neuron_crossover(weights_a, weights_b, shape, rng)
+    elif kind == "weight":
+        child = weight_crossover(weights_a, weights_b, rng)
+    elif kind == "blx":
+        child = blx_crossover(weights_a, weights_b, rng)
+    else:
+        msg = f"unknown crossover {kind!r}"
+        raise ValueError(msg)
     if not evolve_tempo:
         return child
     tempo = parent_b[-1] if rng.random() < 0.5 else parent_a[-1]

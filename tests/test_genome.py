@@ -71,6 +71,20 @@ def test_crossover_takes_the_tempo_from_one_parent() -> None:
     assert tempos == {-1.0, 1.0}
 
 
+def test_every_crossover_kind_keeps_the_length_and_the_tempo() -> None:
+    """Experiment 25's kinds only change how the weights are mixed (D7)."""
+    parent_a = np.append(np.zeros(SHAPE.n_weights), -1.0)
+    parent_b = np.append(np.ones(SHAPE.n_weights), 1.0)
+    for kind in ("neuron", "headless", "weight", "blx"):
+        child = crossover(
+            parent_a, parent_b, SHAPE, True, np.random.default_rng(0), kind
+        )
+        assert child.shape == parent_a.shape
+        assert child[-1] in (-1.0, 1.0)
+    with pytest.raises(ValueError, match="unknown crossover"):
+        crossover(parent_a, parent_b, SHAPE, True, np.random.default_rng(0), "x")
+
+
 def test_a_walk_uses_the_evolved_tempo() -> None:
     config = SimConfig(body="spider_8", duration=1.0, evolve_tempo=True)
     model = build_model(SimpleFlatWorld, "spider_8")

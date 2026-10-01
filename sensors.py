@@ -85,10 +85,15 @@ N_TASK_INPUTS: int = 2 + 3 + 3  # clock, target, gravity
 # Which of the RAYS a brain uses (`SimConfig.vision_rays`, decision D5).
 # "all": the 10 above. "near": straight down plus the four steep (45 degree)
 # rays - on OlympicArena the up ray never fires and the shallow rays mostly
-# measure the arena's edges, not the bumps (experiment 17).
+# measure the arena's edges, not the bumps (experiment 17). "near3": straight
+# down plus the steep rays ahead and behind along the core's +x axis, the axis
+# the target bearing is measured from. "down": straight down only, the body's
+# height above the ground. Fewer rays are tested in experiment 23.
 RAY_SETS: dict[str, tuple[int, ...]] = {
     "all": tuple(range(len(RAYS))),
     "near": (0, 6, 7, 8, 9),
+    "near3": (0, 6, 8),
+    "down": (0,),
 }
 
 
@@ -170,7 +175,8 @@ def vision(
 ) -> FloatArray:
     """The ray distances to the ground (`ground` geoms), scaled to [0, 1].
 
-    `rays` names the set of rays to cast (RAY_SETS): all 10, or the 5 "near".
+    `rays` names the set of rays to cast (RAY_SETS): all 10, the 5 "near",
+    the 3 "near3" or the 1 "down".
 
     A ray that hits nothing reads 1 (maximum range): always the upward ray
     (in the "all" set) while the robot is upright. If the ray origin itself ends up below the

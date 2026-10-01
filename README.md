@@ -69,11 +69,15 @@ spider_8:
 - The genotype is simply all the weights in one list: 832 / 568 of them, plus one tempo
   gene with `--evolve-tempo`.
 
+The final setup (experiment 14) switches vision off and uses two hidden layers, of 8 and
+then 4 neurons (`--no-vision --hidden-layers 8,4`): 16 inputs and 212 weights for spider_8
+(decisions D5, D6).
+
 **Rhythm options** (decision D17, off by default): `--clock-boost 3` makes new random
-networks respond 3× more strongly to the clock, so they start with a clear rhythm; the
-final experiments use it. `--evolve-tempo` adds a gene that sets the clock's frequency
-(0.25-4 Hz); it is **not** used, because an evolved non-weight rhythm parameter comes too
-close to the spec's "no CPG" rule (D17).
+networks respond 3× more strongly to the clock, so they start with a clear rhythm; it was
+used until experiment 18, and the final setup keeps the default of 1. `--evolve-tempo`
+adds a gene that sets the clock's frequency (0.25-4 Hz); it is **not** used, because an
+evolved non-weight rhythm parameter comes too close to the spec's "no CPG" rule (D17).
 
 **The fitness** (lower is better):
 
@@ -87,9 +91,10 @@ its share of the work) and a speed term; see decisions D18 and D20.
 **The EA:** 4 islands of 20 networks each, in a ring. Every generation, on each island:
 
 1. The 2 best networks survive as they are (elitism).
-2. The rest are children: two parents are picked by tournament (size 3). Half of the time
-   they are combined by neuron-level crossover, which copies each hidden neuron whole from
-   one parent. The child is then mutated: every weight gets Gaussian noise, σ = 0.05.
+2. The rest are children: two parents are picked by tournament (size 3). With probability
+   0.5 (0.9 in the final setup, D22) they are combined by neuron-level crossover, which
+   copies each hidden neuron whole from one parent. The child is then mutated: every
+   weight gets Gaussian noise, σ = 0.05.
 3. Every 10 generations, each island copies 2 individuals to the next island, where they
    replace its 2 worst. **Which 2 are sent is the research question:** the `best`, the
    `worst`, `random` ones, or `none` (no migration, the control).
@@ -114,7 +119,7 @@ comparison between policies fair.
 | `genome.py` | The genotype: the network's weights plus the optional tempo gene; the rhythm options |
 | `ea.py` | The island-model EA as `ariel.ec` operations: reproduce, evaluate, migrate, log |
 | `migration.py` | Emigrant selection (best / worst / random / none) and the ring migration |
-| `operators.py` | Neuron-level crossover and tournament selection (mutation is ARIEL's own) |
+| `operators.py` | Neuron-level crossover (and experiment 25's alternatives) and tournament selection (mutation is ARIEL's own) |
 | `network.py` | The neural network, and how a flat genotype maps onto its weights |
 | `sensors.py` | The network inputs, including the 10 vision rays |
 | `simulate.py` | One evaluation: walk the terrain, measure, compute the fitness |
@@ -124,6 +129,9 @@ comparison between policies fair.
 | `compare.py` | Overlay a few runs on the plain distance, by evaluations and by wall-clock time |
 | `unseen.py` | Test each run's best network on 20 terrains it never saw (robustness) |
 | `analyze.py` | **The report's numbers:** mean ± std curves per condition, summary table, statistical tests |
+| `probabilities.py` | How sure we are: for every pair of conditions, the probability that one is better (Bayesian paired t-test), A12 and seeds won |
+| `rq_figure.py` | The research question's answer in one four-panel figure (experiment 14) |
+| `compute_ledger.py` | Counts the compute every experiment used and writes `docs/compute.md` |
 | `experiments/` | One script per experiment we ran, plus the log of what each one showed |
 | `docs/decisions.md` | Every design decision, with its reasoning |
 | `tests/` | Unit tests for all of the above, plus tiny end-to-end runs |
@@ -133,14 +141,16 @@ comparison between policies fair.
 ## Running experiments
 
     uv run --project ../ariel python run.py --policy best --seeds 0 1 2 3 4 \
-        --clock-boost 3 --out results/mine/best
+        --out results/mine/best
     uv run --project ../ariel python run.py --algorithm random_search --seeds 0 1 2 3 4 \
-        --clock-boost 3 --out results/mine/random_search
+        --out results/mine/random_search
     uv run --project ../ariel python run.py --help      # every setting is a flag
 
-The defaults are the final body, world and episode length (spider_8, OlympicArena, 15 s);
-`--clock-boost 3` completes the final setup. Always pass `--out`: without it a run writes
-to `results/<condition>/`, where experiment 8's results live.
+The defaults are the final body, world and episode length (spider_8, OlympicArena, 15 s).
+The rest of the final setup (inputs, brain shape, fitness terms, crossover probability,
+spawn) is a set of flags: copy them from `experiments/14_main_olympic.sh`. Always pass
+`--out`: without it a run writes to `results/<condition>/`, where experiment 8's results
+live.
 
 - **Output:** each run writes to `<out>/seed<S>/`:
   - `config.json`: every setting of the run;
@@ -148,18 +158,19 @@ to `results/<condition>/`, where experiment 8's results live.
   - `database.db`: ARIEL's record of every individual;
   - `best_genotype.npy`: the best network, saved whenever it improves;
   - `summary.json`.
-- **Cost:** a default run (12,000 evaluations) takes about 20 minutes on a 10-core Mac.
-  `run.py` uses 10 worker processes; on a smaller machine pass `--workers 4` (or your
-  core count). Run experiments **one after another**: two at once just makes each slower.
+- **Cost:** a run of the final setup (12,000 evaluations) takes 8-10 minutes on a 10-core
+  Mac. `run.py` uses 10 worker processes; on a smaller machine pass `--workers 4` (or
+  your core count). Run experiments **one after another**: two at once just makes each
+  slower.
 - **The full experiment** for the report is `experiments/14_main_olympic.sh`: 6
-  conditions (4 migration policies, the standard EA, random search) × 5 seeds, about 10
+  conditions (4 migration policies, the standard EA, random search) × 5 seeds, about 4
   hours, written to `results/olympic/`. It passes `--skip-done`, which skips any run
   already finished with exactly the same settings, so an interrupted run can be resumed.
   (`08_main_experiment.sh` is the same experiment on the first setup, spider_16 on rugged.)
 - **Useful flags:**
   - `--body spider_16`: another John Set body;
   - `--world rugged|flat|olympic|amphitheatre|crater`: another ARIEL world;
-  - `--clock-boost 3`: the rhythmic start used in the final setup (D17);
+  - `--clock-boost 3`: the rhythmic start used before experiment 18 (D17);
     `--evolve-tempo` exists but is not used (D17);
   - `--standard`: one population of 80 instead of 4 islands of 20;
   - `--skip-done`: skip seeds that are already finished with the same settings;
@@ -182,7 +193,11 @@ to `results/<condition>/`, where experiment 8's results live.
     uv run --project ../ariel python compare.py results/olympic/best/seed0 results/olympic/none/seed0
     uv run --project ../ariel python unseen.py results/olympic/best/seed*  # robustness: 20 fresh arenas
     uv run --project ../ariel python analyze.py results/olympic/{best,worst,random,none,standard,random_search} \
-        --threshold 0.8 --reference none --out results/olympic/analysis         # report figure + stats
+        --reference none --out results/olympic/analysis                         # report figure + stats
+    uv run --project ../ariel python probabilities.py results/olympic/{best,worst,random,none,standard,random_search} \
+        --out results/olympic/probabilities.md                                  # P(A better than B)
+    uv run --project ../ariel python rq_figure.py                               # the research-question figure
+    uv run --project ../ariel python compute_ledger.py                          # docs/compute.md
 
 `analyze.py` writes to `--out` (default `results/analysis/`):
 

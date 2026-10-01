@@ -20,7 +20,14 @@ import pytest
 from ariel.ec import FloatMutator, set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 
-from ea import EAConfig, Experiment, check_config, next_sigma, operator_rng
+from ea import (
+    EAConfig,
+    Experiment,
+    check_config,
+    new_individual,
+    next_sigma,
+    operator_rng,
+)
 from replay import make_controller
 from run import as_standard, finished_with
 from simulate import SimConfig, build_model, final_sim_config
@@ -149,6 +156,7 @@ def test_operator_stream_is_independent_of_ariels_mutation_stream() -> None:
         ("spawn_yaws", "0,30"),  # more turns than the one terrain
         ("spawn_yaws", "270"),
         ("spawn_yaws", "nan"),
+        ("crossover", "two-point"),
     ],
 )
 def test_impossible_settings_are_rejected(setting: str, value: int | str) -> None:
@@ -266,6 +274,7 @@ def test_skip_done_reads_configs_from_before_new_settings(
     saved_file = tmp_path / "run" / "config.json"
     saved = json.loads(saved_file.read_text())
     del saved["ea"]["stall_generations"], saved["sim"]["vision_rays"]
+    del saved["ea"]["crossover"]
     saved_file.write_text(json.dumps(saved))
     assert finished_with(tmp_path / "run", config, TINY_SIM, "flat")
 
@@ -311,3 +320,29 @@ def test_replay_and_unseen_use_the_walks_a_run_ended_with(
         writer.writeheader()
         writer.writerows(rows)
     assert final_sim_config(tmp_path / "run").duration == TINY_SIM.duration
+
+
+@pytest.mark.parametrize("kind", ["weight", "blx", "headless"])
+def test_every_crossover_kind_runs(kind: str, tmp_path: Path, pool: Pool) -> None:
+    """Experiment 25's operators plug into the same EA."""
+    config = replace(tiny_config("best"), crossover=kind, crossover_probability=1.0)
+    rows = run_tiny(config, tmp_path / "run", pool)
+    assert int(rows[-1]["evaluations"]) >= config.max_evaluations
+
+
+@pytest.mark.parametrize(
+    ("kind", "brings_new_genes"), [("neuron", False), ("headless", True)]
+)
+def test_headless_crosses_with_a_random_genotype(
+    kind: str, brings_new_genes: bool, tmp_path: Path, pool: Pool
+) -> None:
+    """Between all-zero parents, only headless crossover brings in non-zero genes,
+    and its random partner has the full length, tempo gene included (D7)."""
+    sim = replace(TINY_SIM, evolve_tempo=True)
+    config = replace(tiny_config("best"), crossover=kind, crossover_probability=1.0)
+    experiment = Experiment(config, sim, tmp_path, pool, world_factory=SimpleFlatWorld)
+    length = sim.shape.n_weights + 1
+    members = [new_individual(np.zeros(length), 0) for _ in range(config.island_size)]
+    child = experiment.make_child(members, np.zeros(config.island_size), sigma=0.0)
+    assert child.shape == (length,)
+    assert bool(np.any(child != 0.0)) == brings_new_genes

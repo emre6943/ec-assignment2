@@ -4,6 +4,7 @@ Every function takes an explicit `np.random.Generator`, so a run is fully
 determined by its seed. Fitness is a distance to the target: LOWER IS BETTER.
 
 - `neuron_crossover`    decision D7
+- `weight_crossover`, `blx_crossover`   alternatives tested in experiment 25
 - `tournament_select`   decision D9
 
 Mutation is ariel's own `FloatMutator.gaussian` (decision D8); it draws from
@@ -54,6 +55,34 @@ def neuron_crossover(
     bias_from_b = rng.random(shape.n_outputs) < 0.5
     child[-1][-1] = np.where(bias_from_b, matrices_b[-1][-1], matrices_a[-1][-1])
     return pack(child)
+
+
+def weight_crossover(
+    parent_a: Genotype, parent_b: Genotype, rng: np.random.Generator
+) -> Genotype:
+    """Uniform crossover of single weights: each weight from either parent, 50/50.
+
+    Unlike `neuron_crossover`, the weights of one neuron can come from both
+    parents (experiment 25 tests whether keeping neurons whole matters).
+    """
+    return np.where(rng.random(parent_a.shape) < 0.5, parent_b, parent_a)
+
+
+def blx_crossover(
+    parent_a: Genotype,
+    parent_b: Genotype,
+    rng: np.random.Generator,
+    alpha: float = 0.5,
+) -> Genotype:
+    """BLX-alpha (Eshelman & Schaffer 1993): each weight drawn uniformly from the
+    interval between the parents' values, widened by `alpha` times its length on
+    both sides. Identical parents give an identical child, so the spread shrinks
+    as an island converges.
+    """
+    low = np.minimum(parent_a, parent_b)
+    high = np.maximum(parent_a, parent_b)
+    margin = alpha * (high - low)
+    return rng.uniform(low - margin, high + margin)
 
 
 def tournament_select(

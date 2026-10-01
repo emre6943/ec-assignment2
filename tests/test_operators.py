@@ -3,7 +3,12 @@
 import numpy as np
 
 from network import NetworkShape, pack, unpack
-from operators import neuron_crossover, tournament_select
+from operators import (
+    blx_crossover,
+    neuron_crossover,
+    tournament_select,
+    weight_crossover,
+)
 
 SHAPE = NetworkShape(n_inputs=4, hidden=(6,), n_outputs=3)
 DEEP = NetworkShape(n_inputs=4, hidden=(5, 6), n_outputs=3)
@@ -77,3 +82,21 @@ def test_bigger_tournaments_pick_fitter_parents() -> None:
         [fitness[tournament_select(fitness, 5, rng)] for _ in range(2000)]
     )
     assert mean_k5 < mean_k2 < fitness.mean()
+
+
+def test_weight_crossover_takes_each_weight_from_one_parent() -> None:
+    rng = np.random.default_rng(0)
+    a, b = np.zeros(200), np.ones(200)
+    child = weight_crossover(a, b, rng)
+    assert set(np.unique(child)) == {0.0, 1.0}
+    assert 60 < child.sum() < 140  # about half from each
+
+
+def test_blx_stays_near_the_parents_and_copies_equal_ones() -> None:
+    rng = np.random.default_rng(0)
+    a, b = np.zeros(1000), np.ones(1000)
+    child = blx_crossover(a, b, rng)  # alpha 0.5: within [-0.5, 1.5]
+    assert child.min() >= -0.5 and child.max() <= 1.5
+    assert child.min() < 0.0 and child.max() > 1.0  # it does reach outside
+    same = rng.normal(size=50)
+    np.testing.assert_array_equal(blx_crossover(same, same, rng), same)

@@ -3,7 +3,7 @@
 How one generation works (the operations run in this order):
 
     reproduce   per island: keep the elites, fill the rest with children
-                (tournament -> neuron crossover -> Gaussian mutation)
+                (tournament -> crossover -> Gaussian mutation)
     evaluate    everyone new walks the run's terrain(s), in parallel
     migrate     every `migration_interval` generations, each island sends
                 copies of `n_migrants` individuals to the next island in the
@@ -67,6 +67,8 @@ from simulate import fitness as compute_fitness
 
 type Algorithm = Literal["island", "random_search"]
 type TerrainMode = Literal["per_run", "per_generation"]
+type CrossoverKind = Literal["neuron", "weight", "blx", "headless"]
+CROSSOVERS: tuple[str, ...] = ("neuron", "weight", "blx", "headless")
 
 # The parts of a Score stored as tags on every individual, next to its fitness.
 SCORE_PARTS: tuple[str, ...] = tuple(Score.__dataclass_fields__)
@@ -113,6 +115,9 @@ class EAConfig:
     n_elites: int = 2
     tournament_size: int = 3
     crossover_probability: float = 0.5
+    # "neuron" (D7) keeps hidden neurons whole; "weight", "blx" and "headless"
+    # (a random genotype as the second parent) are experiment 25's alternatives.
+    crossover: CrossoverKind = "neuron"
     mutation_sigma: float = 0.05  # chosen by the pilot (D8)
     # Stagnation rule (decision D19); off at 0. When an island's best has not
     # improved for `stall_generations` generations, its sigma doubles (up to
@@ -175,6 +180,8 @@ def check_config(config: "EAConfig") -> None:
         problems.append("final_duration must be 0 (off) or positive")
     if config.final_duration_from < 0:
         problems.append("final_duration_from must be 0 or more")
+    if config.crossover not in CROSSOVERS:
+        problems.append(f"crossover must be one of {', '.join(CROSSOVERS)}")
     try:
         yaws = parse_yaws(config.spawn_yaws)
     except ValueError:
@@ -374,18 +381,31 @@ class Experiment:
         fitness: npt.NDArray[np.float64],
         sigma: float,
     ) -> Genotype:
-        """Tournament -> (maybe) neuron crossover -> Gaussian mutation."""
+        """Tournament -> (maybe) crossover -> Gaussian mutation.
+
+        A "headless chicken" crossover (Jones 1995; experiment 25) crosses the
+        first parent with a fresh random genotype instead of a second parent:
+        a control for whether crossover only acts as a large mutation.
+        """
         if self.config.algorithm == "random_search":
             return self.random_individual()
 
         k = self.config.tournament_size
         parent_a = np.asarray(members[tournament_select(fitness, k, self.rng)].genotype)
         if self.rng.random() < self.config.crossover_probability:
-            parent_b = np.asarray(
-                members[tournament_select(fitness, k, self.rng)].genotype
-            )
+            if self.config.crossover == "headless":
+                parent_b = self.random_individual()
+            else:
+                parent_b = np.asarray(
+                    members[tournament_select(fitness, k, self.rng)].genotype
+                )
             child = crossover(
-                parent_a, parent_b, self.sim.shape, self.sim.evolve_tempo, self.rng
+                parent_a,
+                parent_b,
+                self.sim.shape,
+                self.sim.evolve_tempo,
+                self.rng,
+                self.config.crossover,
             )
         else:
             child = parent_a

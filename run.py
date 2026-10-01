@@ -42,7 +42,7 @@ from ariel.simulation.environments import (
 
 # Local libraries
 from bodies import BODIES, FIRST_BODY
-from ea import EAConfig, Experiment
+from ea import CROSSOVERS, EAConfig, Experiment
 from migration import POLICIES
 from simulate import SimConfig, saved_sim_config
 
@@ -99,6 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
                 parser.add_argument(
                     flag, choices=("per_run", "per_generation"), default=field.default
                 )
+            elif field.name == "crossover":
+                parser.add_argument(flag, choices=CROSSOVERS, default=field.default)
             elif isinstance(field.default, bool):
                 # --vision / --no-vision; type=bool would read "False" as True.
                 parser.add_argument(

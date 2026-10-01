@@ -22,14 +22,14 @@ Status legend:
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
 | D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed |
 | D4 | Controller outputs | 🟡 | One output per hinge (8 for spider_8; 16 for spider_16), direct position control |
-| D5 | Controller inputs | ✅ | 21 for spider_8: joint angles + clock + target vector + tilt + the 5 near vision rays (experiment 18) |
-| D6 | Network shape | ✅ (pilot) | Fixed MLP, one hidden layer of 16; evolve weights only (488 weights for spider_8 with 5 rays) |
-| D7 | Crossover | ✅ (experiments 12, 19b) | Neuron-level uniform crossover, p = 0.9 since tuning (was 0.5) |
+| D5 | Controller inputs | ✅ | 16 for spider_8: 8 joint angles + clock (2) + target vector (3) + tilt (3); no vision since experiment 23 (the rays sensed almost nothing) |
+| D6 | Network shape | ✅ (experiment 24) | Fixed MLP 16-8-4-8 (two hidden layers, a bottleneck of 4); evolve weights only (212 weights) |
+| D7 | Crossover | ✅ (experiments 12, 19b, 25) | Neuron-level uniform crossover, p = 0.9 since tuning (was 0.5); kept against weight-level, BLX-0.5 and headless chicken (experiment 25) |
 | D8 | Mutation | ✅ (pilot) | Gaussian perturbation of every weight, σ = 0.05 |
 | D9 | Selection | 🟡 | Tournament (parents) + generational with elitism (survivors) |
 | D10 | Terrain and noisy fitness | ✅ | One fixed terrain per seed, shared by all conditions with that seed |
-| D11 | Island model settings | 🟡 | 4 islands, ring, migrate every 10 generations, replace worst |
-| D12 | Budget and stopping | ✅ rule / 🟡 size | Fixed budget of 12,000 evaluations per run; 15 s episodes on OlympicArena |
+| D11 | Island model settings | 🟡 | 4 islands, ring, migrate every 10 generations, replace worst; every 5-20 learned equally fast in experiment 26, so 10 stays |
+| D12 | Budget and stopping | ✅ rule / 🟡 size | Fixed budget of 12,000 evaluations per run; 15 s training walks on OlympicArena; the final brains are also tested with 20-60 s walks (step 28) |
 | D13 | Baselines and controls | 🟡 | Random search + no-migration islands |
 | D14 | Final evaluation | 🟡 | Best controllers re-tested on unseen terrains; for OlympicArena after experiment 14 |
 | D15 | Fitness function | ✅ (weights 🟡) | Distance + penalties for the core touching the ground and for being upside down |
@@ -221,10 +221,11 @@ evolutionary algorithms*, Journal of Heuristics 7(4). This is the key citation.
 cannot be measured directly. Instead we report:
 
 1. **Evaluations to reach a threshold**: the first evaluation count at which the best
-   fitness drops below a fixed threshold. Experiment 14 uses 0.8: the OlympicArena pilot
-   (experiment 13, with the tempo gene on and its own random strip) crossed it
-   mid-budget, between 3,000 and 5,000 evaluations. Experiment 8 used 1.6, which the rugged
-   pilot's better settings reached within about 1,400 evaluations.
+   fitness drops below a fixed threshold. Experiment 14 uses 1.6 (`analyze.py`'s
+   default): in tuning (D22), 2 of 3 runs of the tuned setup crossed it within 6,000
+   evaluations and none of the untuned base runs (crossover 0.5) did, so it separates
+   fast runs from slow ones. Experiment 8 used 1.6 too, which the rugged pilot's better
+   settings reached within about 1,400 evaluations.
 2. **Area under the best-fitness curve**, which rewards being good early.
 3. **Final fitness** at the budget cap, on the training terrain; robustness is reported
    separately as the distance reached on unseen terrains (D14).
@@ -237,8 +238,9 @@ cannot be measured directly. Instead we report:
 - **Planned comparisons of each condition against `none`,** the no-migration control:
   two-sided Mann-Whitney U tests with Holm's correction.
 - **Why not all pairs?** With 5 seeds per condition, the smallest possible Mann-Whitney
-  p-value is 0.008. Correcting for all 10 pairs would multiply it past 0.05, so nothing
-  could ever come out significant. Four planned comparisons can.
+  p-value is 0.008. Correcting for all 15 pairs of the six conditions would multiply it
+  past 0.05, so nothing could ever come out significant. The five planned comparisons
+  can (5 × 0.008 = 0.04).
 - A paired Wilcoxon test is no use either: its smallest possible p with 5 pairs is 0.06.
 - **More seeds** would allow more comparisons, if compute allows.
 
@@ -246,10 +248,20 @@ cannot be measured directly. Instead we report:
 migration interval, number of migrants, topology and replacement policy stay fixed (D11).
 Varying any of them as well would be a second research question.
 
+**How sure are we? (added 2026-09-30, `probabilities.py`, step 27).** Besides the
+significance tests above, the report gives, for every pair of conditions paired by seed:
+the mean difference with its 95% interval; the probability that one condition is truly
+better, from a Bayesian paired t-test with a flat prior (Benavoli et al. 2017), split
+into better / practically equal (within ±0.05) / worse; the A12 effect size (Vargha &
+Delaney 2000); and the seeds won. This answers "how likely is policy A better than B?"
+directly, which a p-value does not. The probabilities are per pair and not corrected for
+the number of pairs. Tried on experiment 24: 93% that 16-8-4-8 beats 16-16-8.
+
 ## D4. Controller outputs — 🟡 one per hinge, direct position control
 
-*Numbers in D4-D6 are for spider_16, the body of experiments 1-12. The final body,
-spider_8 (D1), has 8 hinges: 8 outputs, 26 inputs and 27·16 + 17·8 = 568 weights.*
+*Numbers in D4-D6 are for spider_16, the body of experiments 1-12, unless they say
+otherwise. The final body, spider_8 (D1), has 8 hinges, so 8 outputs; its final brain has
+16 inputs (D5) and 212 weights (16-8-4-8, D6).*
 
 **What is actually controlled?** The robot is built from modules: a core, bricks and
 hinges. Only the **hinges** have motors, and `spider_16` has 16 of them (`model.nu == 16`).
@@ -272,7 +284,7 @@ instead of every step (500 Hz). The servos move the joints in between.
   0.61 s per 15 s episode), because the physics itself dominates.
 - **Rhythm:** a 1 Hz gait still gets 50 updates per stride.
 
-## D5. Controller inputs — ✅ 21 inputs for spider_8 with the 5 near rays (`sensors.py`)
+## D5. Controller inputs — ✅ 16 inputs for spider_8, no vision since experiment 23 (`sensors.py`)
 
 The network can only react to what it is told. The spec warns about this directly: *a
 controller with no signal telling it where the target is, or nothing to drive rhythmic
@@ -350,7 +362,84 @@ clearly taller (see D17). A 0.5 m gap from the ray count alone mostly shows how 
 single-seed pilot is; the posture differences between the boost settings are large and
 consistent, the distance differences are not.
 
-## D6. Network shape — ✅ one hidden layer of 16, chosen by a pilot
+**Even fewer rays? (experiment 23, 2026-09-30).** Stuck robots mostly do not touch the
+ground: their legs keep stepping, but the brain switches to a step pattern that does not
+push (tested on 4 stuck brains; only one scraped a bump). The rays let a brain react to its
+own arena's exact bumps, which may cause both that switching and the overfitting to one
+arena (D23). Fewer inputs also mean fewer weights: 488 (5 rays), 456 (3), 424 (1), 408
+(none), so at most 16% fewer. Tested against the final EA (experiment 22's runs without
+the stagnation rule) on seeds 100-102:
+
+- `near3`: straight down plus the 45° rays ahead and behind along the core's +x axis, the
+  axis the target bearing is measured from;
+- `down`: straight down only, the body's height above the ground;
+- none: `--no-vision`.
+
+Rule fixed before the results: a smaller set replaces the 5 rays only if its brains end
+closer to the target on the 20 unseen arenas (15 s) than the 5-ray brains on all 3 seeds
+and on the mean; if several pass, the one with the lowest mean.
+
+| Rays (weights) | Unseen distance, seeds 100 / 101 / 102 | Unseen mean | Training fitness at 6,000 | AUC |
+|---|---|---|---|---|
+| 5 `near` (488), the setup then | 1.100 / 0.653 / 1.013 | **0.922** | 1.348 ± 0.229 | 1.913 |
+| 3 `near3` (456) | 1.132 / 1.096 / **0.912** | 1.047 | 1.628 ± 0.228 | 1.979 |
+| 1 `down` (424) | **0.961** / 0.860 / 1.300 | 1.041 | 1.513 ± 0.306 | 1.906 |
+| none (408) | **0.935** / 1.086 / **0.890** | 0.970 | **1.339 ± 0.184** | **1.768** |
+
+Unseen distance in metres left after 15 s (lower is better); bold where a set beats the 5
+rays. No unseen walk reached the target.
+
+**First decision, by the rule: the 5 near rays stay.** No smaller set beats them on all 3
+seeds.
+
+- **No vision did as well as 5 rays, not better.** It trained to the same fitness, learned
+  a little faster (lower AUC; below 1.6 sooner) and was as good on unseen arenas (0.97 vs
+  0.92 m). The rule fixed for this test keeps the current set on a tie; experiment 22's
+  rule preferred the simpler EA on a tie. This test's own rule applies.
+- **For the report:** at this scale the rays add nothing measurable. The bumps are a few
+  centimetres, and the down ray, the tilt input and the joint angles seem to carry what
+  matters.
+- **Vision is not what makes brains overfit or get stuck:** blind brains lose as much on
+  unseen arenas (0.45 m on their own arena, 0.97 m on new ones) as brains with rays. The
+  arena-specific behaviour must come through the other inputs and the walk's dynamics.
+
+**Final decision (Emre, 2026-09-30): no vision in experiment 14 (`--no-vision`).** Why the
+rays sense almost nothing on OlympicArena, measured over a 15 s walk of the best 5-ray
+brain (seed 101), on its own arena and on flat ground:
+
+| Input (scaled to 0-1) | Spread while walking, own arena | Same, flat ground |
+|---|---|---|
+| The 5 rays | 0.005-0.013 (1.4-4.0 cm) | 0.003-0.012 (0.9-3.7 cm) |
+| Joint angles | 0.21 | 0.21 |
+
+- **The signal is tiny.** A ray reads up to 3 m and the bumps are about ±2 cm, so a bump
+  moves a ray input by less than 0.01, 20-40 times less than the joint angles move.
+- **The rays mostly measure the robot itself.** On flat ground, with no bumps at all,
+  they vary almost as much as on the arena: what they pick up is the body bobbing and
+  tilting as it walks, which the tilt input and the joint angles already report.
+- **They were never aimed at the target.** They are terrain sensors fixed to the body:
+  one straight down and four 45° down around it. The target has its own inputs (distance
+  and direction), and the robots often walk sideways, so no fixed ray would point at the
+  target anyway.
+- **Why vision was there:** it was chosen for RuggedTerrainWorld, whose hills are up to
+  0.5 m high and worth seeing. OlympicArena's bumps are a few centimetres.
+- **Why this overrides the test's own tie rule:** the rule kept the current set on a tie,
+  but this measurement shows the tie is no accident: the rays carry almost no information
+  about the terrain. Experiment 22 already let the simpler EA win a tie. Removing them
+  leaves 16 inputs and 408 weights, and changes nothing else.
+- Tuning (D22) and experiment 22 ran with the 5 rays. Experiment 23's blind runs used the
+  same settings and trained as well (1.339 vs 1.348), so those settings carry over.
+
+**The 16 inputs of the final brain** (all scaled to about [-1, 1]):
+
+| Inputs | Count | What they tell the brain |
+|---|---|---|
+| Joint angles | 8 | Where each of the 8 hinges is now |
+| Clock | 2 | sin and cos of a 1 Hz beat, for a rhythm |
+| Target | 3 | Distance to the target / 2 m, and sin and cos of its direction seen from the robot |
+| Tilt | 3 | Which way is up, seen from the core: how the body leans |
+
+## D6. Network shape — ✅ 16-8-4-8 since experiment 24 (was one hidden layer of 16)
 
 **Weights only, or topology too?** There are two families of neuroevolution:
 
@@ -405,7 +494,62 @@ Best fitness at the end (lower is better; standing still scores 2.0):
   reasonable settings, not to prove one shape is better. It is a development choice, not
   part of the research question.
 
-## D7. Crossover — ✅ neuron-level uniform crossover, kept after experiment 12; p = 0.9 since tuning (D22)
+**Shape test on the final setup (experiment 24, 2026-09-30).** The one hidden layer of 16
+was chosen on spider_16, rugged terrain, the old fitness and one seed (experiment 7);
+since then the body, world, inputs (16, D5) and fitness have all changed. Five shapes
+against 16-16-8 (408 weights), seeds 100-102, 6,000 evaluations:
+
+| Shape | Weights | Tests |
+|---|---|---|
+| 16-8-8 | 208 | narrower |
+| 16-32-8 | 808 | wider |
+| 16-8-8-8 | 280 | deeper, small |
+| 16-16-16-8 | 680 | deeper at the current width |
+| 16-8-4-8 | 212 | a bottleneck of 4 (Emre's idea) |
+
+How a shape is usually chosen in neuroevolution, and why this way:
+
+- **Compare candidates on several seeds** with a rule fixed in advance: the tuning
+  approach (Eiben & Smit 2011), used here.
+- **Evolve the topology** (NEAT, Stanley & Miikkulainen 2002): start without hidden nodes
+  and add nodes and links by mutation. Principled, but a different EA: genomes change
+  length, so crossover and migration would need redesigning, which changes the research
+  question. Future work.
+- **Budget per weight:** 12,000 evaluations give 408 weights about 29 evaluations each;
+  808 weights get half that. At a fixed budget, bigger brains are harder to search.
+
+Rule fixed before the results (D22's rule): a shape replaces 16-16-8 only if its best
+fitness at 6,000 evaluations beats 16-16-8 on all 3 seeds and on the mean; if several do,
+the one with the lowest mean. Every brain also gets the standard unseen test. Known bias:
+σ = 0.05 was tuned for 16-16-8, and a bigger network gets more total mutation noise per
+child, which slightly favours smaller networks.
+
+| Shape | Weights | Best fitness, seeds 100 / 101 / 102 | Mean | Beats 16-16-8 on | Unseen mean | AUC |
+|---|---|---|---|---|---|---|
+| 16-16-8 (was final) | 408 | 1.196 / 1.546 / 1.276 | 1.339 | — | 0.970 m | 1.768 |
+| 16-8-8 | 208 | 1.384 / 1.808 / 1.250 | 1.481 | 1 of 3 | 1.019 m | 1.971 |
+| 16-32-8 | 808 | 1.825 / 1.708 / 1.881 | 1.805 | 0 of 3 | 1.194 m | 2.235 |
+| 16-8-8-8 | 280 | 0.927 / 1.450 / 1.649 | 1.342 | 2 of 3 | 1.003 m | 1.885 |
+| 16-16-16-8 | 680 | 1.766 / 1.696 / 1.442 | 1.635 | 0 of 3 | 1.024 m | 2.075 |
+| **16-8-4-8** | **212** | **1.176 / 1.367 / 1.065** | **1.203** | **3 of 3** | **0.845 m** | **1.699** |
+
+**Decision: 16-8-4-8, the bottleneck (`--hidden-layers 8,4`), 212 weights.** It is the only
+shape that passes the rule, and it is also the best on the unseen arenas (better on 2 of 3
+seeds), learns fastest (lowest AUC) and crossed fitness 1.6 in all 3 runs.
+
+- **Why a bottleneck can help:** the 8 motors are driven by only 4 shared signals, so the
+  legs are pushed to move in coordinated patterns rather than 8 independent ones, and there
+  are half as many weights to search. Coordinated patterns of this kind are how legged
+  gaits are usually described; the result fits that, though it does not prove it.
+- **The big networks were still improving at 6,000 evaluations** (16-32-8's last gains came
+  at 5,600-6,000), so this measures learning speed at a fixed budget, which is what the
+  research question is about. At 12,000 they might close some of the gap.
+- **Margins:** seed 100 is close (1.176 vs 1.196); the rule asks for consistency, not size.
+  The σ bias above favours small networks.
+- **Crossover:** with two hidden layers, our neuron crossover moves the first layer's
+  neurons without their outgoing weights. Experiment 25 tests the crossover on this shape.
+
+## D7. Crossover — ✅ neuron-level uniform crossover, kept after experiments 12 and 25; p = 0.9 since tuning (D22)
 
 Crossover builds a child from two parents. Three candidates:
 
@@ -445,6 +589,12 @@ decides which parent it comes from. That neuron's 35 incoming weights (34 inputs
 and 16 outgoing weights are copied together. On average, half of the neurons come from
 each parent. The 16 output biases belong to no hidden neuron, so each is taken from a
 random parent.
+
+On the final brain (16-8-4-8, D6), each of the 8 first-layer neurons moves with its 17
+incoming weights (16 inputs + bias), and each of the 4 second-layer neurons with its 9
+incoming weights (8 + bias) and its 8 outgoing ones; the 8 output biases come from a
+random parent each. A weight belongs to exactly one unit, so the first layer's outgoing
+weights travel with the second-layer neuron they feed.
 
 Crossover probability: 0.5. The other half of the children are a copy of one parent. Every
 child is then mutated (D8). These values are identical across all research-question
@@ -486,6 +636,83 @@ curve. Not significant.
 **Update (D22):** on the final setup, tuning raised the crossover probability from 0.5 to
 0.9, and switching crossover off was the worst of the tuned settings. Both point the same
 way as experiment 12, now more clearly.
+
+**Why does it work if most children are worse? (2026-09-30)** Measured on the final EA
+(experiment 23's no-vision run, seed 100): real parent pairs rebuilt from saved generations
+with the EA's own tournament, 60 children per operator, each child compared with its
+better parent.
+
+| Child made by | Beats its better parent (generation 10 / 40 / 83) |
+|---|---|
+| Copy + mutation (no crossover) | 7% / 13% / 3% |
+| Neuron crossover + mutation (ours) | 2% / 10% / 7% |
+| Neuron crossover, no mutation | 3% / 10% / 8% |
+| Each weight from either parent + mutation | 3% / 7% / 2% |
+| Average of the parents + mutation | 7% / 15% / 7% |
+
+- Most children are worse than their better parent for **every** operator, mutation
+  included (85-98%). That is normal: variation mostly breaks things, selection keeps the
+  rare improvement, and the elites protect the best. A bad child costs one evaluation.
+- Our crossover is not much worse than mutation alone. What it adds is the kind of rare
+  improvement: whole neurons from two lineages combined, and bigger structured steps.
+- Mixing single weights was the most damaging, as the conventions argument predicts.
+- One run and 60 children per cell: differences of a few percent are noise.
+
+**Literature (research summary, citations verified):**
+
+- The operator is Montana & Davis's (1989) neuron-as-unit idea with SANE/ESP's unit
+  definition (Moriarty & Miikkulainen 1996; Gomez & Miikkulainen 1997): a hidden neuron
+  moves with its in- and out-weights. Montana & Davis found little difference between
+  weight-level, neuron-level and matched crossover.
+- The competing-conventions problem is milder in practice than its reputation (Hancock
+  1992). It needs parents from different lineages. Within an island everyone descends from
+  a few elites, so neuron j means the same in both parents and the child lands close to
+  both: crossover acts as a small, structured mutation scaled by the parents' distance.
+  Where it can bite is a native crossed with a fresh immigrant: part of the Discussion.
+- Crossover helps between aligned (related) parents (NEAT's ablation, Stanley &
+  Miikkulainen 2002) and hurts between unrelated networks (Bodnar et al. 2020, MuJoCo Ant).
+  Uriot & Izzo (2020) first align the parents' neurons by how well they correlate, then
+  cross them; on MNIST and CIFAR-10 the children kept far more of their parents' skill
+  than with naive crossover.
+- "Headless chicken" crossover (Jones 1995), crossing a parent with a random genotype,
+  separates a real recombination benefit from a large-mutation effect.
+
+**Experiment 25:** three operators against ours, chosen by Emre, 3 seeds, 6,000
+evaluations, the final setup with experiment 24's brain:
+
+| Operator | Definition | Tests |
+|---|---|---|
+| Weight-level uniform | each weight from either parent, 50/50 | whether keeping neurons whole matters |
+| BLX-0.5 | each weight drawn uniformly from [lo − 0.5d, hi + 0.5d], d = hi − lo of the parents | blending; its spread shrinks as an island converges (Eshelman & Schaffer 1993) |
+| Headless chicken | our neuron crossover with a fresh random genotype instead of a second parent | whether our crossover is just a big mutation (Jones 1995) |
+
+Rule fixed before the results: an operator replaces ours only if it beats it on all 3
+seeds and on the mean best fitness at 6,000 evaluations. Mutation afterwards is unchanged.
+
+**Results (experiment 25, on 16-8-4-8, D6):**
+
+| Operator | Best fitness, seeds 100 / 101 / 102 | Mean | Beats ours on | Unseen mean (seeds) |
+|---|---|---|---|---|
+| **Neuron (ours)** | 1.176 / 1.367 / 1.065 | 1.203 | — | 0.845 m (0.72 / 0.90 / 0.92) |
+| Weight-level uniform | 1.252 / 1.762 / 1.235 | 1.416 | 0 of 3 | 0.906 m |
+| BLX-0.5 | **1.004 / 1.178** / 1.322 | **1.168** | 2 of 3 | **0.716 m (0.61 / 0.70 / 0.83)** |
+| Headless chicken | 2.356 / 2.129 / 2.136 | 2.207 | 0 of 3 | 1.331 m |
+
+**Decision: our neuron crossover stays.** No operator beats it on all 3 seeds.
+
+- **Headless chicken is by far the worst** (2.21 vs 1.20; it never crossed 1.6). Crossing
+  with a random brain instead of a real partner ruins the search, so our crossover is
+  not just a big mutation: combining two good parents is what helps. This answers the
+  doubt that started the test.
+- **Weight-level uniform lost on every seed,** as the competing-conventions argument
+  predicts: keeping neurons whole matters.
+- **BLX-0.5 is the interesting one.** Better on 2 of 3 seeds and on the mean, and better on
+  unseen arenas on all 3 seeds; its seed-100 brain is the first to reach the target on
+  unseen arenas within 15 s (1 of 20). It fails the rule on seed 102 (1.322 vs 1.065), so
+  it is not adopted. There is also a reason tied to the research question: a blend pulls
+  an immigrant toward the natives' average and dilutes it within a few generations (see
+  above), which would blur the very effect of migration we measure. For the report:
+  promising for robustness, future work.
 
 ## D8. Mutation — ✅ Gaussian perturbation, σ = 0.05 (chosen by the pilot)
 
@@ -583,6 +810,42 @@ migrate.
 | Replacement on arrival | Immigrants replace the island's worst | Fixed for all conditions |
 | Copy or move | Copy (the emigrant also stays home) | Standard; keeps island sizes constant |
 
+**Follow-up: how often to migrate (experiment 26, queued after experiment 14,
+2026-09-30).** Migrating rarely keeps the islands apart, so each explores its own
+solutions; migrating often spreads good ones fast but can pull every island into the
+same local optimum. With the best policy every 10 generations, all 4 islands held the
+same champion within about 2,000 evaluations (experiment 20). The interval was
+deliberately not tuned (D22), since it sets the context of the research question, so
+this is a separate question on experiment 14's setup, seeds and arenas: the best policy
+migrating every 5, 20 and 50 generations; experiment 14 supplies every 10 (`best`) and
+never (`none`). Exploratory: no setting changes because of it. Measured: convergence and
+final fitness across the five intervals, and how different the islands stay (the
+genotype spread per island, and how soon every island holds the same champion).
+Background: Cantú-Paz (2001); Skolicki & De Jong (2005).
+
+**Results (experiment 26, 2026-10-01; probabilities from step 27, paired by seed):**
+
+| Migrate the best every | Final fitness | AUC | Unseen distance | All islands share one champion | Within-island spread at the end |
+|---|---|---|---|---|---|
+| 5 generations | 1.120 ± 0.219 | 1.503 | 0.931 m | 35% of generations, from about 4,000 evaluations | 0.99 |
+| 10 (experiment 14) | 1.130 ± 0.317 | 1.491 | 0.857 m | 28%, from about 6,800 | 1.11 |
+| **20** | **1.093 ± 0.241** | 1.497 | **0.764 m** | 6% (2 of 5 runs ever) | 1.24 |
+| 50 | 1.255 ± 0.276 | 1.602 | 0.939 m | never | 1.53 |
+| never (experiment 14's `none`) | 1.245 ± 0.211 | 1.649 | 0.911 m | never | 1.31 |
+
+- **There is a sweet spot, as Emre expected.** Every 5, 10 or 20 generations learn equally
+  fast (AUC probabilities 42-58% between them), and all three beat migrating every 50
+  (93-99%) or never (96-100%). Every 50 is about as bad as no migration (final fitness
+  47%): 3 migrations in 166 generations are too few to spread anything.
+- **Every 20 is the best compromise:** the best final fitness (100% likely better than
+  never, 85% than every 50; 58-59% against 5 and 10, a tie) and the best on unseen arenas
+  (77% vs every 10, 92% vs every 5, 99% vs never).
+- **Diversity, measured:** the more often the best migrate, the sooner every island holds
+  the same champion (from about 4,000 evaluations at 5, 6,800 at 10; rarely at 20; never
+  at 50) and the less diverse each island stays. Every 20 keeps the islands apart while
+  still sharing good solutions often enough to speed up the search.
+- One policy and 5 seeds: exploratory. Experiment 14 keeps its literature value of 10.
+
 ## D12. Budget and stopping — ✅ fixed budget; size chosen from the curves
 
 **Rule (team decision, 2026-09-28): every run stops after a fixed number of evaluations**,
@@ -604,9 +867,9 @@ the same way.
 by a third. spider_8 on OlympicArena can reach the target, and experiment 13 ran at 15 s,
 so the final setup keeps the template's 15 s.
 
-**Final budget (experiment 14): 12,000 evaluations per run**, about 20 minutes on
-OlympicArena, about 10 hours for 6 conditions × 5 seeds. The OlympicArena pilot was still
-improving at 8,000 evaluations.
+**Final budget (experiment 14): 12,000 evaluations per run**, 8-10 minutes on
+OlympicArena, about 4 hours for 6 conditions × 5 seeds (measured; `docs/compute.md`). The
+OlympicArena pilot was still improving at 8,000 evaluations.
 
 **Measured cost** on this Mac (M3 Pro, 10 worker processes, vision on):
 
@@ -625,6 +888,42 @@ conditions × 5 seeds in about 7 h; the standard EA was added later as a sixth).
 - On OlympicArena, experiment 15 made 95% of its progress by 5,000 evaluations and its
   last improvement at 8,800, then nothing until 48,600. So 12,000 covers the learning
   phase plus a stretch of plateau, and stays the budget for experiment 14.
+
+**Longer test walks (step 28, `longer_walks.py`, 2026-10-01).** Training stays at 15 s.
+After experiment 14 we asked whether the brains miss the target because of the 15 s limit
+or because of how they walk: every run's best brain walked its own arena for 15, 20, 30
+and 60 s (ending on arrival), and the 20 unseen arenas for 30 s.
+
+| Condition | Reached in 15 s | 20 s | 30 s | 60 s | Unseen arenas, 15 s | Unseen, 30 s |
+|---|---|---|---|---|---|---|
+| migrate best | 1 of 5 | 2 | 2 | 3 | 0% | 6% |
+| migrate worst | 1 of 5 | 3 | 3 | 3 | 0% | 13% |
+| migrate random | 0 of 5 | 1 | 1 | 1 | 0% | 5% |
+| no migration | 0 of 5 | 2 | 2 | 2 | 0% | 7% |
+| standard EA | 1 of 5 | 3 | 3 | 3 | 4% | 7% |
+| random search | 0 of 5 | 0 | 0 | 0 | 0% | 0% |
+| **all** | **3 of 30** | **11** | **11** | **12** | | |
+
+(`results/olympic/longer_walks.md` and `.png`; experiment 26's intervals in
+`longer_walks_interval.*`.)
+
+- **15 s is binding for about a third of the brains.** 8 brains that miss in 15 s arrive
+  between 15.2 and 19.6 s: they head for the target and run out of time.
+- **The rest stall, and more time does not help:** from 20 to 60 s only one more brain
+  arrives. They get stuck 0.2-0.7 m away (legs moving, body still: D23), and one fell over
+  during the 60 s walk.
+- **On unseen arenas more time helps a little:** at most 4% of the walks arrive in 15 s,
+  5-13% in 30 s. Generalising to new arenas stays the main limit (D23).
+- **The policy hardly matters here** (1-3 of 5 per condition at 30 s); random search
+  never arrives.
+- **Why we keep training at 15 s:** it is the research question's fixed budget, and
+  training with 20 s walks did not help in experiment 21 (old setup). Brains that learn to
+  get as close as possible in 15 s are mostly heading the right way, and a longer test
+  shows what they have learnt. Report both: the 15 s results for the research question,
+  and the 30 s test for what the brains can do.
+- "Reached" here is about each run's best-fitness brain. During evolution, other brains
+  of 5 of the 30 runs entered the target circle within 15 s (`rq_figure.py --metric
+  distance`, panel C), because the closest brain is not always the fittest one.
 
 ## D13. Baselines and controls — 🟡
 
@@ -1245,17 +1544,38 @@ on any seed, let alone all three.
 
 ## References (to verify when writing the report)
 
+- Benavoli, A., Corani, G., Demšar, J., & Zaffalon, M. (2017). Time for a change: a
+  tutorial for comparing multiple classifiers through Bayesian analysis. *Journal of
+  Machine Learning Research*, 18(77), 1–36.
+- Bodnar, C., Day, B., & Lió, P. (2020). Proximal distilled evolutionary reinforcement
+  learning. *AAAI*, 34(04), 3283–3290.
 - Cantú-Paz, E. (2001). Migration policies, selection pressure, and parallel evolutionary
   algorithms. *Journal of Heuristics*, 7(4), 311–334.
 - Eiben, A. E., & Smit, S. K. (2011). Parameter tuning for configuring and analyzing
   evolutionary algorithms. *Swarm and Evolutionary Computation*, 1(1), 19–31.
-- Gomez, F., & Miikkulainen, R. (1997). Incremental evolution of complex general behavior.
-  *Adaptive Behavior*, 5(3–4), 317–342.
 - Eiben, A. E., & Smith, J. E. (2015). *Introduction to Evolutionary Computing* (2nd ed.).
   Springer. (Chapters on island models, selection pressure and recombination.)
+- Eshelman, L. J., & Schaffer, J. D. (1993). Real-coded genetic algorithms and
+  interval-schemata. *FOGA 2*, 187–202.
+- Gomez, F., & Miikkulainen, R. (1997). Incremental evolution of complex general behavior.
+  *Adaptive Behavior*, 5(3–4), 317–342.
+- Hancock, P. J. B. (1992). Genetic algorithms and permutation problems: a comparison of
+  recombination operators for neural net structure specification. *COGANN-92*, 108–122.
 - Jakobi, N. (1997). Evolutionary robotics and the radical envelope-of-noise hypothesis.
   *Adaptive Behavior*, 6(2), 325–368.
+- Jones, T. (1995). Crossover, macromutation, and population-based search. *ICGA-95*, 73–80.
+- Montana, D. J., & Davis, L. (1989). Training feedforward neural networks using genetic
+  algorithms. *IJCAI-89*, 762–767.
+- Moriarty, D. E., & Miikkulainen, R. (1996). Efficient reinforcement learning through
+  symbiotic evolution. *Machine Learning*, 22, 11–32.
 - Schaffer, J. D., Whitley, D., & Eshelman, L. J. (1992). Combinations of genetic
   algorithms and neural networks: A survey of the state of the art. *COGANN-92*.
+- Skolicki, Z., & De Jong, K. (2005). The influence of migration sizes and intervals on
+  island models. *GECCO '05*, 1295–1302.
 - Stanley, K. O., & Miikkulainen, R. (2002). Evolving neural networks through augmenting
   topologies. *Evolutionary Computation*, 10(2), 99–127.
+- Uriot, T., & Izzo, D. (2020). Safe crossover of neural networks through neuron alignment.
+  *GECCO '20*. doi:10.1145/3377930.3390197
+- Vargha, A., & Delaney, H. D. (2000). A critique and improvement of the CL common
+  language effect size statistics of McGraw and Wong. *Journal of Educational and
+  Behavioral Statistics*, 25(2), 101–132.
