@@ -7,3 +7,4 @@ __pycache__/
 .claude/
 results/
 .DS_Store
+!report/figures/walk_filmstrip.png
