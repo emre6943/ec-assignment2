@@ -8,6 +8,7 @@ import pytest
 from ariel.simulation.environments import SimpleFlatWorld
 
 from bodies import body_info
+from replay import make_controller
 from sensors import CORE_BODY, heading
 from simulate import (
     CARRY_HEIGHT,
@@ -231,3 +232,28 @@ def test_a_walk_measures_motor_work(flat_model: mj.MjModel) -> None:
     rng = np.random.default_rng(0)
     score = walk(rng.normal(0, 1, config.genotype_length), flat_model, config)
     assert 0.0 <= score.work_imbalance <= 1.0
+
+
+def test_a_brain_with_position_inputs_walks(flat_model: mj.MjModel) -> None:
+    """Experiment 29's brain: 18 inputs, 228 weights for spider_8 with 8,4."""
+    config = SimConfig(
+        body="spider_8", vision=False, hidden_layers="8,4", position=True, duration=0.5
+    )
+    assert config.shape.n_inputs == 18
+    assert config.shape.n_weights == 228
+    model = build_model(SimpleFlatWorld, "spider_8")
+    score = walk(np.ones(config.shape.n_weights) * 0.1, model, config)
+    assert np.isfinite(score.distance)
+
+
+def test_replay_feeds_position_inputs_to_the_brain() -> None:
+    """replay.py must build the same 18-input vector as the walks did."""
+    config = SimConfig(
+        body="spider_8", vision=False, hidden_layers="8,4", position=True
+    )
+    model = build_model(SimpleFlatWorld, "spider_8")
+    data = mj.MjData(model)
+    mj.mj_forward(model, data)
+    control = make_controller(np.ones(config.shape.n_weights) * 0.1, config, model)
+    control(model, data)
+    assert np.all(np.isfinite(data.ctrl))

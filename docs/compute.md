@@ -13,14 +13,14 @@ parallel or were paused.
 | Phase | Runs | Evaluations | Walks | Simulated h | Wall-clock h | Unseen-test walks |
 |---|---|---|---|---|---|---|
 | development | 69 (3 unfinished) | 797,352 | 870,024 | 3,239.4 | 20.7 | 1,593 |
-| tuning | 86 | 532,204 | 532,204 | 2,088.4 | 11.0 | 1,101 |
+| tuning | 111 | 833,004 | 833,004 | 3,343.9 | 14.5 | 1,626 |
 | final | 45 | 541,440 | 541,440 | 2,269.1 | 6.4 | 2,070 |
-| **total** | 200 (3 unfinished) | 1,870,996 | 1,943,668 | 7,596.9 | 38.0 | 4,764 |
+| **total** | 225 (3 unfinished) | 2,171,796 | 2,244,468 | 8,852.4 | 41.5 | 5,289 |
 
 - **development**: building and debugging the problem (world, body, fitness,
   inputs, walk length): experiments 1-6, 8-11, 13, 15-18, 20, 21.
 - **tuning**: choosing the EA's and the brain's settings by controlled
-  comparisons: experiments 7, 12, 19, 19b, 22-25.
+  comparisons: experiments 7, 12, 19, 19b, 22-25, 29.
 - **final**: the research-question experiment 14, and 26's follow-up on the
   migration interval.
 
@@ -54,3 +54,4 @@ parallel or were paused.
 | 24 (tuning) | 15 | 90,840 | 90,840 | 379.8 | 1.5 | 315 |
 | 25 (tuning) | 9 | 54,504 | 54,504 | 227.9 | 0.6 | 189 |
 | 26 (final) | 15 | 180,480 | 180,480 | 756.4 | 2.2 | 690 |
+| 29 (tuning) | 25 | 300,800 | 300,800 | 1,255.5 | 3.5 | 525 |

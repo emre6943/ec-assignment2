@@ -61,7 +61,14 @@ def make_controller(
         step = round(d.time / m.opt.timestep)
         if step % config.control_every == 0:
             inputs = read_inputs(
-                m, d, core_id, TARGET_XY, ground, clock_hz, config.vision_rays
+                m,
+                d,
+                core_id,
+                TARGET_XY,
+                ground,
+                clock_hz,
+                config.vision_rays,
+                config.position,
             )
             d.ctrl[:] = forward(weights, shape, inputs) * HALF_PI
 

@@ -10,12 +10,14 @@ compares **island-model migration policies**.
 **Status (2026-10-01): every experiment is done, and the paper draft is in
 [`report/`](report/).** The final setup is `spider_8` on `OlympicArena` (the code's
 defaults). The research-question experiment is `experiments/14_main_olympic.sh`; its
-follow-ups are 26 (how often to migrate), 27 (statistics) and 28 (longer test walks).
+follow-ups are 26 (how often to migrate), 27 (statistics), 28 (longer test walks) and 29
+(the absolute position as two extra inputs: no gain, not adopted).
 
 **The answer in one paragraph:** migrating (any policy) makes the islands converge faster
 than no migration (89-96% probability), and migrating the best is the fastest. But after
 12,000 evaluations the policies end at about the same fitness and do equally well on
-unseen arenas, and one standard population (no islands) ended best. How *often* the
+unseen arenas, and one standard population (no islands) ended best, although that lead
+did not survive adding two inputs to the brain (experiment 29). How *often* the
 islands migrate matters more than *whom* they send: every 20 generations was best. Only 3
 of 30 best brains reach the target in the 15 s they trained for; 11 do given 20 s.
 
@@ -94,7 +96,7 @@ experiment 14's exact setup; change `--policy` to `worst`, `random` or `none`, o
         --policy best --out results/olympic/best
 
 **Run the whole final experiment and its follow-ups** (one after another; about 4 + 2.5
-hours of evolution on a 10-core Mac, plus the tests). Each script skips runs that are
++ 3.5 hours of evolution on a 10-core Mac, plus the tests). Each script skips runs that are
 already finished, so an interrupted one can simply be started again:
 
     bash experiments/14_main_olympic.sh          # the research question: 6 conditions x 5 seeds
@@ -102,6 +104,7 @@ already finished, so an interrupted one can simply be started again:
     bash experiments/26_migration_interval.sh    # migrate every 5 / 20 / 50 generations
     bash experiments/27_statistics.sh            # probabilities: results/olympic/probabilities*.md
     bash experiments/28_longer_walks.sh          # 15 / 20 / 30 / 60 s test walks
+    bash experiments/29_absolute_position.sh     # 14 again, brains also told their (x, y)
 
 **Watch a brain walk.** `replay.py` saves an `.mp4` in the run's folder and prints how far
 from the target the robot ended:
@@ -152,7 +155,8 @@ where the target lies) and has 15 seconds to walk to a target 2 m away.
 
 - **16 inputs:** the 8 joint angles; a clock (sin and cos of a 1 Hz beat); where the
   target is relative to the robot's heading (distance, sin and cos of its direction); how
-  the body is tilted (3 values).
+  the body is tilted (3 values). The robot's absolute (x, y) is not an input: the target
+  direction already carries it, and adding it (`--position`, experiment 29) did not help.
 - **8 outputs:** one target angle per hinge.
 - The genotype is simply all 212 weights (biases included) in one list.
 
@@ -214,7 +218,7 @@ comparison between policies fair.
 | `migration.py` | Emigrant selection (best / worst / random / none) and the ring migration |
 | `operators.py` | Neuron-level crossover (and experiment 25's alternatives) and tournament selection (mutation is ARIEL's own) |
 | `network.py` | The neural network, and how a flat genotype maps onto its weights |
-| `sensors.py` | The network inputs, including the 10 vision rays |
+| `sensors.py` | The network inputs, including the 10 vision rays and the optional absolute (x, y) |
 | `simulate.py` | One evaluation: walk the terrain, measure, compute the fitness |
 | `terrain.py` | What counts as ground in each world, and a spawn height that clears it (the template's spawn buries the robot) |
 | `plot.py` | Curves of one run: fitness, per-island best, posture, genetic diversity |

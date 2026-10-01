@@ -96,6 +96,14 @@ EXPERIMENTS: list[tuple[str, str, list[str]]] = [
         [f"tuning/{name}" for name in ("h8_4_weight", "h8_4_blx", "h8_4_headless")],
     ),
     ("26", "final", [f"olympic/best_int{interval}" for interval in (5, 20, 50)]),
+    (
+        "29",
+        "tuning",
+        [
+            f"olympic/pos_{name}"
+            for name in ("best", "worst", "random", "none", "standard")
+        ],
+    ),
 ]
 PHASES = ("development", "tuning", "final")
 
@@ -239,7 +247,7 @@ def main() -> None:
         "- **development**: building and debugging the problem (world, body, fitness,",
         "  inputs, walk length): experiments 1-6, 8-11, 13, 15-18, 20, 21.",
         "- **tuning**: choosing the EA's and the brain's settings by controlled",
-        "  comparisons: experiments 7, 12, 19, 19b, 22-25.",
+        "  comparisons: experiments 7, 12, 19, 19b, 22-25, 29.",
         "- **final**: the research-question experiment 14, and 26's follow-up on the",
         "  migration interval.",
         "",

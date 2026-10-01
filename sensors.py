@@ -16,8 +16,10 @@ The input vector - 34 values for spider_16, each scaled to roughly [-1, 1]:
 Vision can be switched off (`SimConfig.vision`), which leaves 24 inputs for
 spider_16. Other bodies (`SimConfig.body`) have a different number of hinges.
 
-The robot's absolute position is deliberately NOT an input: the target vector
+The robot's absolute position is NOT an input by default: the target vector
 carries the useful part of it in a form that means the same everywhere.
+Experiment 29 tests that choice: `SimConfig.position` appends the core's
+world (x, y), divided by 2 like the target distance, as the last 2 inputs.
 
 Layout of every John Set body (measured): qpos[0:3] core position,
 qpos[3:7] core orientation quaternion, qpos[7:] one angle per hinge;
@@ -81,6 +83,7 @@ RAY_DIRECTIONS: npt.NDArray[np.float64] = np.array(
 )
 
 N_TASK_INPUTS: int = 2 + 3 + 3  # clock, target, gravity
+N_POSITION_INPUTS: int = 2  # the core's world (x, y), if `position` is on
 
 # Which of the RAYS a brain uses (`SimConfig.vision_rays`, decision D5).
 # "all": the 10 above. "near": straight down plus the four steep (45 degree)
@@ -110,9 +113,16 @@ RAY_SET_DIRECTIONS: dict[str, npt.NDArray[np.float64]] = {
 }
 
 
-def n_inputs(vision: bool, hinges: int = 16, rays: str = "all") -> int:
+def n_inputs(
+    vision: bool, hinges: int = 16, rays: str = "all", position: bool = False
+) -> int:
     """Length of the input vector for a body with `hinges` motors."""
-    return hinges + N_TASK_INPUTS + (len(ray_set(rays)) if vision else 0)
+    return (
+        hinges
+        + N_TASK_INPUTS
+        + (len(ray_set(rays)) if vision else 0)
+        + (N_POSITION_INPUTS if position else 0)
+    )
 
 
 def hinge_angles(data: mj.MjData) -> FloatArray:
@@ -154,6 +164,17 @@ def target_in_body_frame(
     return np.array(
         [distance / TARGET_DISTANCE_SCALE, np.sin(bearing), np.cos(bearing)]
     )
+
+
+def absolute_position(data: mj.MjData, core_id: int) -> FloatArray:
+    """The core's absolute (x, y) in the world, divided by 2 (experiment 29).
+
+    Spawn is at (0, 0) and the target at (2, 0), so x runs from 0 at the start
+    to 1 at the target, like the target distance input in reverse. Unlike the
+    target vector this is in the world's frame: the same reading means the same
+    spot on the arena, whichever way the robot faces.
+    """
+    return data.xpos[core_id, :2] / TARGET_DISTANCE_SCALE
 
 
 def gravity_in_body_frame(data: mj.MjData, core_id: int) -> FloatArray:
@@ -212,8 +233,12 @@ def read_inputs(
     ground: tuple[int, ...] | None,
     clock_hz: float = CLOCK_HZ,
     rays: str = "all",
+    position: bool = False,
 ) -> FloatArray:
-    """Assemble the network's input vector (without vision if `ground` is None)."""
+    """Assemble the network's input vector (without vision if `ground` is None).
+
+    With `position`, the core's absolute (x, y) comes last (experiment 29).
+    """
     parts = [
         hinge_angles(data),
         clock(data.time, clock_hz),
@@ -222,4 +247,6 @@ def read_inputs(
     ]
     if ground is not None:
         parts.append(vision(model, data, core_id, ground, rays))
+    if position:
+        parts.append(absolute_position(data, core_id))
     return np.concatenate(parts)

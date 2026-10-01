@@ -78,6 +78,7 @@ class SimConfig:
     control_every: int = 10  # physics steps per network update (10 x 2 ms = 50 Hz)
     vision: bool = True  # the terrain-sensing rays as extra inputs
     vision_rays: str = "all"  # which rays: "all" 10 or the 5 "near" ones (D5)
+    position: bool = False  # the core's absolute (x, y) as 2 extra inputs (exp. 29)
     hidden_layers: str = "16"  # neurons per hidden layer, e.g. "16" or "8,8" (D6)
     body: str = DEFAULT_BODY  # a John Set body (bodies.BODIES, decision D1)
     evolve_tempo: bool = False  # a tempo gene sets the clock (genome.py, D17)
@@ -114,7 +115,7 @@ class SimConfig:
     def shape(self) -> NetworkShape:
         """The network shape, hence the genotype length."""
         return NetworkShape(
-            n_inputs(self.vision, self.hinges, self.vision_rays),
+            n_inputs(self.vision, self.hinges, self.vision_rays, self.position),
             parse_hidden(self.hidden_layers),
             self.hinges,
         )
@@ -392,7 +393,14 @@ def walk(
         power = data.actuator_force * data.qvel[6 : 6 + model.nu]
         hinge_work += np.maximum(power, 0.0) * update_period
         inputs = read_inputs(
-            model, data, core_id, TARGET_XY, vision_ground, clock_hz, config.vision_rays
+            model,
+            data,
+            core_id,
+            TARGET_XY,
+            vision_ground,
+            clock_hz,
+            config.vision_rays,
+            config.position,
         )
         data.ctrl[:] = forward(weights, shape, inputs) * HALF_PI
         mj.mj_step2(model, data)

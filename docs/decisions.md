@@ -22,7 +22,7 @@ Status legend:
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
 | D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed |
 | D4 | Controller outputs | 🟡 | One output per hinge (8 for spider_8; 16 for spider_16), direct position control |
-| D5 | Controller inputs | ✅ | 16 for spider_8: 8 joint angles + clock (2) + target vector (3) + tilt (3); no vision since experiment 23 (the rays sensed almost nothing) |
+| D5 | Controller inputs | ✅ | 16 for spider_8: 8 joint angles + clock (2) + target vector (3) + tilt (3); no vision since experiment 23 (the rays sensed almost nothing); absolute (x, y) tested in experiment 29 and not added (no gain in training, slightly slower and worse on unseen arenas) |
 | D6 | Network shape | ✅ (experiment 24) | Fixed MLP 16-8-4-8 (two hidden layers, a bottleneck of 4); evolve weights only (212 weights) |
 | D7 | Crossover | ✅ (experiments 12, 19b, 25) | Neuron-level uniform crossover, p = 0.9 since tuning (was 0.5); kept against weight-level, BLX-0.5 and headless chicken (experiment 25) |
 | D8 | Mutation | ✅ (pilot) | Gaussian perturbation of every weight, σ = 0.05 |
@@ -308,6 +308,49 @@ network also works out where the target is from there, and it would have to lear
 separately for every location. The target vector **relative to the robot's heading** gives
 exactly the useful part in a form that means the same everywhere: "the goal is 1.3 m away,
 30° to my left". Absolute position is therefore replaced, not dropped.
+
+**Tested in experiment 29 (2026-10-01, Emre's question): not added.** The target never
+moves from (2, 0), so the target vector already fixes where the robot is; absolute (x, y)
+adds only the world heading. What (x, y) can add is a way to tie actions to places on the
+one training arena ("a bump at x = 0.8: lift the legs here"), so we expect the same or
+better training fitness and worse results on unseen arenas. `--position` appends the
+core's world (x, y), divided by 2, as 2 more inputs (18 inputs, 228 weights). Experiment
+14 is rerun with it for every EA condition, same seeds and arenas, so each run pairs with
+its twin. Decision rule, fixed before the results: the inputs join D5 only if, over the
+25 pairs, the position brains end closer to the target on unseen arenas with P ≥ 0.9 and
+are not worse on training fitness. Experiment 14 is not rerun either way.
+
+Results (paired by seed and arena; P = probability that the position brains are truly
+better, Bayesian paired t-test; `results/olympic/probabilities_position_*.md`):
+
+| Condition | Training fitness | AUC | Unseen distance (m) |
+|---|---|---|---|
+| best | 1.130 → 1.134 (49%) | 1.491 → 1.495 (49%) | 0.857 → 0.923 (29%) |
+| worst | 1.172 → 1.060 (84%) | 1.582 → 1.532 (62%) | 0.830 → 1.041 (25%) |
+| random | 1.137 → 1.167 (42%) | 1.545 → 1.624 (29%) | 0.863 → 0.861 (51%) |
+| none | 1.245 → 1.116 (84%) | 1.649 → 1.647 (51%) | 0.911 → 0.832 (81%) |
+| standard | 0.957 → 1.288 (12%) | 1.431 → 1.722 (4%) | 0.885 → 1.041 (20%) |
+| **all 25 pairs** | 1.128 → 1.153 (37%) | 1.539 → 1.604 (14%) | 0.869 → 0.940 (16%) |
+
+- **The rule fails clearly:** P = 16% on unseen distance against the 90% required. The
+  position inputs are not added; D5 stands.
+- **Training fitness: no difference** (+0.025, 95% interval −0.12 to +0.17; 13 of 25
+  pairs won). The extra inputs give the search 16 more weights and no new information.
+- **Slightly slower convergence** (AUC +0.065; 8 of 25 pairs won), consistent with a
+  larger search space and σ tuned for 212 weights.
+- **Slightly worse on unseen arenas** (+0.07 m; 61% that it is worse by more than 5 cm).
+  The hypothesis leans true but is not proven. Three unseen walks of position brains
+  ended with the robot walking off the side of the arena (scored 10 m, the failed
+  score), against one of the experiment-14 brains. Scoring those as 2 m (no progress)
+  instead gives 0.853 → 0.892 m (P = 22%): the same conclusion.
+- **The arena matters more than the inputs.** Averaged over the five conditions, the
+  per-seed training difference runs from −0.23 (seed 3) to +0.32 (seed 2). Seed 4 is the
+  counter-example: position brains were better there in training and on unseen arenas.
+- **Side observation for the research question:** with position inputs the standard EA
+  falls from first (0.957) to last (1.288) and loses on AUC on all 5 seeds, while no
+  policy differs significantly (Friedman p = 0.66). The standard EA's lead in experiment
+  14 is therefore not robust to a small change of the brain.
+- 5 of 25 position brains reached their own target in 15 s, against 3 of 25.
 
 **Vision (team decision: included, 10 rays).** Rays start at a point 0.25 m above the
 core's centre. That point is fixed to the body, so the rays tilt and turn with the robot.

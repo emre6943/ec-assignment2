@@ -12,10 +12,12 @@ from sensors import (
     RAY_MAX_RANGE,
     RAY_ORIGIN,
     RAYS,
+    absolute_position,
     n_inputs,
+    read_inputs,
     vision,
 )
-from simulate import build_model
+from simulate import TARGET_XY, build_model
 from terrain import ground_geoms
 
 DOWN, UP = 0, 1
@@ -97,3 +99,33 @@ def test_near_rays_are_down_plus_the_four_steep_ones(
     assert n_inputs(vision=False, hinges=8, rays="near") == 8 + 8
     with pytest.raises(ValueError, match="unknown ray set"):
         n_inputs(vision=True, rays="many")
+
+
+def test_position_is_the_core_world_xy_over_two(
+    flat: tuple[mj.MjModel, mj.MjData],
+) -> None:
+    """Experiment 29: the core's absolute (x, y), scaled like the target distance."""
+    model, data = flat
+    mj.mj_resetData(model, data)
+    data.qpos[0:2] = [1.0, -0.5]
+    mj.mj_forward(model, data)
+    core = model.body(CORE_BODY).id
+    expected = data.xpos[core, :2] / 2.0
+    np.testing.assert_allclose(absolute_position(data, core), expected)
+    assert expected[0] == pytest.approx(0.5, abs=0.01)
+
+
+def test_position_adds_two_inputs_at_the_end(
+    flat: tuple[mj.MjModel, mj.MjData],
+) -> None:
+    model, data = flat
+    mj.mj_resetData(model, data)
+    data.qpos[0:2] = [0.4, 0.3]
+    mj.mj_forward(model, data)
+    core = model.body(CORE_BODY).id
+    without = read_inputs(model, data, core, TARGET_XY, None)
+    with_position = read_inputs(model, data, core, TARGET_XY, None, position=True)
+    assert n_inputs(vision=False, hinges=model.nu, position=True) == len(without) + 2
+    assert len(with_position) == n_inputs(vision=False, hinges=model.nu, position=True)
+    np.testing.assert_array_equal(with_position[:-2], without)
+    np.testing.assert_allclose(with_position[-2:], absolute_position(data, core))
