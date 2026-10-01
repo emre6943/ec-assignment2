@@ -471,10 +471,23 @@ def probabilities() -> None:
 
 
 def fitness_terms() -> None:
-    """The champion's fitness split into its weighted terms, mean over seeds."""
+    """The champion's fitness split into its weighted terms, mean over seeds.
+
+    Needs every run's `database.db`, the one file that is too big to share;
+    without them the figure is skipped.
+    """
+    runs = {condition: runs_of(OLYMPIC / condition) for condition in CONDITIONS}
+    missing = [
+        r for rs in runs.values() for r in rs if not (r / "database.db").exists()
+    ]
+    if missing:
+        print(
+            f"fitness_terms.pdf skipped: no database.db in {len(missing)} run folders"
+        )
+        return
     rows = []
     for condition in CONDITIONS:
-        for run in runs_of(OLYMPIC / condition):
+        for run in runs[condition]:
             sim = saved_sim_config(json.loads((run / "config.json").read_text())["sim"])
             fitness, score = champion(run)
             terms = weighted_terms(score, sim)

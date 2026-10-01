@@ -7,46 +7,139 @@ Assignment 1 evolved a body. This one takes a fixed body and evolves the weights
 neural-network controller, so that it walks towards a target. Our research question
 compares **island-model migration policies**.
 
-**The final setup (2026-09-29): `spider_8` on `OlympicArena`**, and those are now the
-code's defaults. Experiments 1-12 used `spider_16` on `RuggedTerrainWorld`: spider_16 is
-too weak to lift its own body, and rugged terrain stopped every body we tried (decisions
-D1, D2, D17). Their scripts pass their old settings explicitly, so they still reproduce.
-The research-question experiment on the final setup is `experiments/14_main_olympic.sh`.
+**Status (2026-10-01): every experiment is done, and the paper draft is in
+[`report/`](report/).** The final setup is `spider_8` on `OlympicArena` (the code's
+defaults). The research-question experiment is `experiments/14_main_olympic.sh`; its
+follow-ups are 26 (how often to migrate), 27 (statistics) and 28 (longer test walks).
+
+**The answer in one paragraph:** migrating (any policy) makes the islands converge faster
+than no migration (89-96% probability), and migrating the best is the fastest. But after
+12,000 evaluations the policies end at about the same fitness and do equally well on
+unseen arenas, and one standard population (no islands) ended best. How *often* the
+islands migrate matters more than *whom* they send: every 20 generations was best. Only 3
+of 30 best brains reach the target in the 15 s they trained for; 11 do given 20 s.
 
 **New here? Read in this order:**
 
 1. This README: setup, how to run things, where everything is.
-2. [`docs/decisions.md`](docs/decisions.md): every design choice, the alternatives and why
+2. [`report/main.pdf`](report/main.pdf): the paper draft, the short version of everything.
+3. [`docs/decisions.md`](docs/decisions.md): every design choice, the alternatives and why
    we chose what we did. This is the raw material for the report's Methods section.
-3. [`experiments/README.md`](experiments/README.md): every experiment we ran, what we
+4. [`experiments/README.md`](experiments/README.md): every experiment we ran, what we
    learned, and the script to reproduce it.
+
+Experiments 1-12 used `spider_16` on `RuggedTerrainWorld`: spider_16 is too weak to lift
+its own body, and rugged terrain stopped every body we tried (decisions D1, D2, D17).
+Their scripts pass their old settings explicitly, so they still reproduce.
 
 ## Quick start
 
-**1. Setup.** This repo has no Python environment of its own. Every command runs against
-the course's ARIEL fork, which must sit **next to** this folder and be named `ariel`:
+**1. Install `uv`** (the Python tool every command uses), once:
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh          # macOS / Linux
+    # Windows (PowerShell): powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+The commands below are for a macOS or Linux terminal. On Windows, use WSL or Git Bash:
+the experiment scripts are bash scripts.
+
+**2. Get the code.** This repo has no Python environment of its own. Every command runs
+against the course's ARIEL fork, which must sit **next to** this folder and be named
+`ariel`:
+
+    mkdir EvolutionaryComputing && cd EvolutionaryComputing
+    git clone https://github.com/AndrzejSzczepura/EvolutionaryComputing2026 ariel
+    git clone https://github.com/emre6943/ec-assignment2 assignment2
+    cd assignment2
 
     EvolutionaryComputing/
-    ├── ariel/         # git clone https://github.com/AndrzejSzczepura/EvolutionaryComputing2026 ariel
+    ├── ariel/         # the course's fork; never edit it
     └── assignment2/   # this repo
 
 Then run everything from inside `assignment2/` as `uv run --project ../ariel python ...`.
+The first command installs ARIEL's dependencies (Python 3.12+, MuJoCo), which takes a
+minute or two.
 
-**2. Check it works** (about 30 seconds):
+**3. Check it works** (about 30 seconds):
 
     uv run --project ../ariel python -m pytest tests -q
 
-**3. A tiny evolution run** (about 15 seconds; small population, short walks):
+**4. A tiny evolution run** (about 15 seconds; small population, short walks):
 
     uv run --project ../ariel python run.py --policy best --seeds 0 \
         --max-evaluations 150 --island-size 6 --n-elites 1 --n-migrants 1 \
         --migration-interval 2 --duration 3 --out results/smoke
 
-**4. Look at it:**
+**5. Look at it:**
 
     uv run --project ../ariel python plot.py results/smoke/seed0     # -> results/smoke/seed0/run.png
     uv run --project ../ariel python replay.py results/smoke/seed0   # -> a video in that folder
     uv run --project ../ariel python replay.py results/smoke/seed0 --viewer   # live 3D window
+
+## Recipes: the final experiment, videos, figures and the paper
+
+Copy and paste these from inside `assignment2/`. Everything writes under `results/`,
+which is not in git (see "Using someone else's results" below).
+
+**Run one condition of the final experiment for one seed** (about 10 minutes). This is
+experiment 14's exact setup; change `--policy` to `worst`, `random` or `none`, or replace
+`--policy best` with `--standard` or `--algorithm random_search`:
+
+    uv run --project ../ariel python run.py --skip-done --seeds 0 \
+        --world olympic --body spider_8 --duration 15 --no-evolve-tempo \
+        --no-vision --clock-boost 1 --hidden-layers 8,4 \
+        --ground-contact-weight 1.0 --low-body-weight 1.0 --carry-height 0.04 \
+        --work-imbalance-weight 0.5 --leg-imbalance-weight 0 \
+        --speed-weight 0.5 --stop-at-target \
+        --crossover-probability 0.9 --ariel-spawn --max-evaluations 12000 \
+        --policy best --out results/olympic/best
+
+**Run the whole final experiment and its follow-ups** (one after another; about 4 + 2.5
+hours of evolution on a 10-core Mac, plus the tests). Each script skips runs that are
+already finished, so an interrupted one can simply be started again:
+
+    bash experiments/14_main_olympic.sh          # the research question: 6 conditions x 5 seeds
+    bash experiments/14_main_olympic.sh 0 1      # ...or only seeds 0 and 1
+    bash experiments/26_migration_interval.sh    # migrate every 5 / 20 / 50 generations
+    bash experiments/27_statistics.sh            # probabilities: results/olympic/probabilities*.md
+    bash experiments/28_longer_walks.sh          # 15 / 20 / 30 / 60 s test walks
+
+**Watch a brain walk.** `replay.py` saves an `.mp4` in the run's folder and prints how far
+from the target the robot ended:
+
+    uv run --project ../ariel python replay.py results/olympic/standard/seed4               # the best brain of all
+    uv run --project ../ariel python replay.py results/olympic/standard/seed4 --duration 30 # walk longer
+    uv run --project ../ariel python replay.py results/olympic/standard/seed4 --new-terrain # an arena it never saw
+    uv run --project ../ariel python replay.py results/olympic/standard/seed4 --viewer      # live 3D window
+
+The best run of each condition (lowest final fitness) is `standard/seed4`, `best/seed0`,
+`best_int20/seed0`, `best_int5/seed0`, `random/seed4`, `best_int50/seed0`, `worst/seed0`,
+`none/seed0` and `random_search/seed3`, from best to worst.
+
+**Make the figures and tables:**
+
+    uv run --project ../ariel python paper_figures.py     # the paper's figures -> report/figures/
+    uv run --project ../ariel python rq_figure.py         # one-page answer -> results/olympic/rq_figure.png
+    uv run --project ../ariel python rq_figure.py --metric distance
+
+More analysis commands are under "Looking at results" below.
+
+**Build the paper** (`report/`, the course's GECCO'19 LaTeX template):
+
+- **Overleaf** (easiest): zip `main.tex`, `references.bib`, `acmart.cls`,
+  `ACM-Reference-Format.bst` and the `figures/` folder from `report/`, then in Overleaf
+  choose *New Project → Upload Project* and pick the zip.
+- **Locally:** install [Tectonic](https://tectonic-typesetting.github.io) (`brew install
+  tectonic` on a Mac), then `cd report && tectonic -X compile main.tex`.
+
+The limit is 6 pages without the cover page and the bibliography. `\todo{...}` marks what
+still has to be filled in.
+
+**Using someone else's results.** `results/` is not in git, and each seed's arena is
+random per machine, so you cannot regenerate the exact same results elsewhere. To work
+with the team's numbers, copy the whole `results/olympic/` folder from whoever ran it
+(Emre) into your `results/`, terrains included. Without the `database.db` files it is
+about 50 MB, and everything still works except the fitness-terms figure of
+`paper_figures.py`.
 
 ## What the code does
 
@@ -55,23 +148,18 @@ Then run everything from inside `assignment2/` as `uv run --project ../ariel pyt
 (`--world`, default `olympic` = `OlympicArena`: a flat start, then a gently rugged strip
 where the target lies) and has 15 seconds to walk to a target 2 m away.
 
-**The brain:** a feed-forward neural network. Numbers below are for spider_16, then
-spider_8:
+**The brain** (final setup): a feed-forward neural network, 16 → 8 → 4 → 8 with `tanh`.
 
-- **34 / 26 inputs:**
-  - one joint angle per hinge (16 / 8);
-  - a clock (sin/cos at 1 Hz, or at an evolved tempo with `--evolve-tempo`);
-  - where the target is relative to the robot's heading (3 values);
-  - how the body is tilted (3 values);
-  - 10 "vision" rays that measure the distance to the ground around it.
-- **One hidden layer of 16 neurons.**
-- **16 / 8 outputs:** one target angle per hinge.
-- The genotype is simply all the weights in one list: 832 / 568 of them, plus one tempo
-  gene with `--evolve-tempo`.
+- **16 inputs:** the 8 joint angles; a clock (sin and cos of a 1 Hz beat); where the
+  target is relative to the robot's heading (distance, sin and cos of its direction); how
+  the body is tilted (3 values).
+- **8 outputs:** one target angle per hinge.
+- The genotype is simply all 212 weights (biases included) in one list.
 
-The final setup (experiment 14) switches vision off and uses two hidden layers, of 8 and
-then 4 neurons (`--no-vision --hidden-layers 8,4`): 16 inputs and 212 weights for spider_8
-(decisions D5, D6).
+The code's defaults are older: 10 "vision" rays to the ground and one hidden layer of 16
+(34 inputs and 832 weights for spider_16). The final setup switches them off with
+`--no-vision --hidden-layers 8,4`, because the rays sensed almost nothing on OlympicArena
+and the 8-4 bottleneck learned best (decisions D5, D6).
 
 **Rhythm options** (decision D17, off by default): `--clock-boost 3` makes new random
 networks respond 3× more strongly to the clock, so they start with a clear rhythm; it was
@@ -79,20 +167,25 @@ used until experiment 18, and the final setup keeps the default of 1. `--evolve-
 adds a gene that sets the clock's frequency (0.25-4 Hz); it is **not** used, because an
 evolved non-weight rhythm parameter comes too close to the spec's "no CPG" rule (D17).
 
-**The fitness** (lower is better):
+**The fitness** of the final setup (lower is better):
 
     distance to the target at the end
-      + 0.5 × share of the walk with the body on the ground
-      + 1.0 × share of the walk upside down
+      + 0.5 × the distance averaged over the whole walk     (be fast; 0 after arriving)
+      + 1.0 × share of the walk with the body on the ground (stand)
+      + 1.0 × share of the walk upside down                 (stay upright)
+      + 1.0 × how far the body sits below 4 cm, on average  (carry the body)
+      + 0.5 × how far the laziest leg's motor work falls short of the average (use all legs)
 
-Standing still scores 2.0. The final setup adds gait terms (carry the body, every leg does
-its share of the work) and a speed term; see decisions D18 and D20.
+Holding still scores 5.0; arriving at once, standing tall, scores 0. The code's defaults
+only have the first, third and fourth terms (with 0.5 for the ground); the others are
+flags (decisions D15, D18, D20). Walks end as soon as the robot is within 0.1 m of the
+target.
 
 **The EA:** 4 islands of 20 networks each, in a ring. Every generation, on each island:
 
 1. The 2 best networks survive as they are (elitism).
 2. The rest are children: two parents are picked by tournament (size 3). With probability
-   0.5 (0.9 in the final setup, D22) they are combined by neuron-level crossover, which
+   0.9 (the code's default is 0.5; tuning chose 0.9, D22) they are combined by neuron-level crossover, which
    copies each hidden neuron whole from one parent. The child is then mutated: every
    weight gets Gaussian noise, σ = 0.05.
 3. Every 10 generations, each island copies 2 individuals to the next island, where they
@@ -131,9 +224,13 @@ comparison between policies fair.
 | `analyze.py` | **The report's numbers:** mean ± std curves per condition, summary table, statistical tests |
 | `probabilities.py` | How sure we are: for every pair of conditions, the probability that one is better (Bayesian paired t-test), A12 and seeds won |
 | `rq_figure.py` | The research question's answer in one four-panel figure (experiment 14) |
+| `longer_walks.py` | Walk the best brains for longer than they trained (15/20/30/60 s; step 28) |
+| `paper_figures.py` | The paper's figures, as PDFs, into `report/figures/` |
 | `compute_ledger.py` | Counts the compute every experiment used and writes `docs/compute.md` |
+| `report/` | The paper: `main.tex`, `references.bib`, the course's ACM template, `figures/` and the built `main.pdf` |
 | `experiments/` | One script per experiment we ran, plus the log of what each one showed |
 | `docs/decisions.md` | Every design decision, with its reasoning |
+| `docs/compute.md` | How many evaluations and hours every experiment used |
 | `tests/` | Unit tests for all of the above, plus tiny end-to-end runs |
 | `A2_template_2026.py` | The course template, **unchanged** (except line 71: headless mode). Not used by our code |
 | `Assignment2.pdf` | The spec |
@@ -197,6 +294,8 @@ live.
     uv run --project ../ariel python probabilities.py results/olympic/{best,worst,random,none,standard,random_search} \
         --out results/olympic/probabilities.md                                  # P(A better than B)
     uv run --project ../ariel python rq_figure.py                               # the research-question figure
+    uv run --project ../ariel python longer_walks.py results/olympic/{best,worst,random,none,standard,random_search} \
+        --out results/olympic/longer_walks                                      # 15-60 s test walks
     uv run --project ../ariel python compute_ledger.py                          # docs/compute.md
 
 `analyze.py` writes to `--out` (default `results/analysis/`):
