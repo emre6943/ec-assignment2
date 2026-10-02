@@ -7,11 +7,14 @@ Assignment 1 evolved a body. This one takes a fixed body and evolves the weights
 neural-network controller, so that it walks towards a target. Our research question
 compares **island-model migration policies**.
 
-**Status (2026-10-01): every experiment is done, and the paper draft is in
+**Status (2026-10-02): experiments 1-29 are done, and the paper draft is in
 [`report/`](report/).** The final setup is `spider_8` on `OlympicArena` (the code's
-defaults). The research-question experiment is `experiments/14_main_olympic.sh`; its
-follow-ups are 26 (how often to migrate), 27 (statistics), 28 (longer test walks) and 29
-(the absolute position as two extra inputs: no gain, not adopted).
+defaults). The research question was first answered by `experiments/14_main_olympic.sh`;
+its follow-ups are 26 (how often to migrate), 27 (statistics), 28 (longer test walks) and
+29 (the absolute position as two extra inputs: no gain, not adopted). **The final
+experiment is `experiments/99_final_experiment.sh`** (prepared, not run yet): 14 again
+with migration every 20 generations and 20 fresh seeds, for firmer statistics. The paper
+will report 99; the paragraph below summarises 14 until then.
 
 **The answer in one paragraph:** migrating (any policy) makes the islands converge faster
 than no migration (89-96% probability), and migrating the best is the fastest. But after
@@ -105,6 +108,16 @@ already finished, so an interrupted one can simply be started again:
     bash experiments/27_statistics.sh            # probabilities: results/olympic/probabilities*.md
     bash experiments/28_longer_walks.sh          # 15 / 20 / 30 / 60 s test walks
     bash experiments/29_absolute_position.sh     # 14 again, brains also told their (x, y)
+
+**The final experiment** (about 18 hours; its header has the command that runs it on
+emre-server as a service). A run that was cut off (crash, power cut) continues from its
+last saved generation when the script is started again (`run.py --resume`):
+
+    bash experiments/99_final_experiment.sh      # 6 conditions x 20 seeds (10-29)
+    WORKERS=8 bash experiments/99_final_experiment.sh 10 11   # fewer workers, two seeds
+
+With seeds given, only those seeds run and get the unseen test; the analysis at the end
+still reads every seed in `results/final/`.
 
 **Watch a brain walk.** `replay.py` saves an `.mp4` in the run's folder and prints how far
 from the target the robot ended:
@@ -308,8 +321,9 @@ live.
 - `summary.csv` / `summary.md`: per run and per condition, the best fitness at the
   budget, evaluations to reach a threshold, the area under the curve and (after
   `unseen.py`) the distance on unseen terrain;
-- `stats.md`: a Friedman test across all conditions (blocked by seed), and Mann-Whitney
-  U tests of each condition against `--reference` (default `none`), Holm-corrected
+- `stats.md`: a Friedman test across all conditions (blocked by seed), Mann-Whitney
+  U tests of each condition against `--reference` (default `none`), Holm-corrected,
+  and paired Wilcoxon tests of every pair of conditions, also in `paired_tests.csv`
   (decision D3 explains why). Pass `--out` to write somewhere else than `results/analysis/`.
 
 ## Rules we follow

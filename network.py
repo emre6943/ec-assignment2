@@ -26,6 +26,8 @@ import numpy.typing as npt
 
 type Genotype = npt.NDArray[np.float64]
 type Weights = list[npt.NDArray[np.float64]]
+# Per layer: (weights, biases), the matrix without and with only its last row.
+type Layers = list[tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]]
 
 
 @dataclass(frozen=True)
@@ -95,7 +97,23 @@ def forward(
     inputs: npt.NDArray[np.float64],
 ) -> npt.NDArray[np.float64]:
     """Run the network once. Returns `n_outputs` values in [-1, 1]."""
+    return run_layers(layers(genotype, shape), inputs)
+
+
+def layers(genotype: Genotype, shape: NetworkShape) -> Layers:
+    """`unpack`, with every matrix split into its weights and its bias row.
+
+    A walk runs the same network hundreds of times, so it cuts the network up
+    once and calls `run_layers` (one of the walk speed-ups of 2026-10-02).
+    """
+    return [(matrix[:-1], matrix[-1]) for matrix in unpack(genotype, shape)]
+
+
+def run_layers(
+    network: Layers, inputs: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Run a network already cut up by `layers`: the same values as `forward`."""
     activation = inputs
-    for matrix in unpack(genotype, shape):
-        activation = np.tanh(activation @ matrix[:-1] + matrix[-1])
+    for weights, biases in network:
+        activation = np.tanh(activation @ weights + biases)
     return activation

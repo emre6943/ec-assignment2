@@ -13,6 +13,7 @@ Each argument is a condition folder holding `seed*/` run folders. Writes into
                       if `unseen.py` has been run
     summary.md        per condition: mean ± std of those numbers
     stats.md          the statistical tests (see below)
+    paired_tests.csv  the all-pairs tests of point 3, one row per pair and metric
 
 How each number is defined (decision D3):
 
@@ -31,12 +32,21 @@ The statistics (decision D3), on the best fitness at the budget and on the AUC:
    Holm-corrected. With 5 seeds per condition the smallest possible
    Mann-Whitney p is 0.008, so only a few planned comparisons - not all
    pairs - can ever reach significance after correction.
+3. All pairs, paired by seed (for the final experiment's 20 seeds): every
+   pair of conditions with a two-sided Wilcoxon signed-rank test on the
+   per-seed differences, Holm-corrected across the pairs of each metric, with
+   the median difference and the matched-pairs rank-biserial correlation as
+   effect sizes. Also on the unseen-terrain distance when it is there. With
+   n seeds the smallest possible p is 2 / 2^n: 0.0625 for experiment 14's 5,
+   so nothing can be significant there.
 """
 
 # Standard library
 import argparse
 import json
+from itertools import combinations
 from pathlib import Path
+from typing import NamedTuple
 
 # Third-party libraries
 import matplotlib as mpl
@@ -46,7 +56,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from scipy.stats import friedmanchisquare, mannwhitneyu
+from scipy.stats import friedmanchisquare, mannwhitneyu, rankdata, wilcoxon
 
 # The four migration policies in fixed categorical order (checked for
 # colour-blind separation); random search is the neutral baseline.
@@ -65,7 +75,30 @@ GRID = "#e4e3df"
 SURFACE = "#fcfcfb"
 GRID_POINTS = 200
 TESTED_METRICS = ("final_fitness", "auc")
+PAIRED_METRICS = (*TESTED_METRICS, "unseen_distance")
+ALPHA = 0.05
+# The logs keep 4 decimals; rounding the differences stops float noise in the
+# subtraction from splitting what are really tied differences (scipy's advice).
+DIFFERENCE_DECIMALS = 9
+EXACT_UP_TO = 50  # nonzero differences; 2^50 still counts exactly in a float
 INCOMPLETE_RUN_SHARE = 0.95  # a run that stopped below this share of its budget
+
+
+class PairedTest(NamedTuple):
+    """One pair of conditions on one metric, paired by seed.
+
+    The differences are A - B and lower is better, so a negative median
+    difference or rank-biserial correlation means A did better.
+    """
+
+    metric: str
+    a: str
+    b: str
+    pairs: int
+    median_difference: float
+    rank_biserial: float
+    p: float
+    p_holm: float
 
 
 def best_so_far(run: Path) -> pd.DataFrame:
@@ -120,13 +153,24 @@ def holm(p_values: list[float]) -> list[float]:
     return adjusted.tolist()
 
 
+def complete_blocks(table: pd.DataFrame, metric: str) -> pd.DataFrame:
+    """One row per seed and one column per condition, for complete seeds only.
+
+    A seed missing from any condition (a run still going, an unseen test not yet
+    done) is dropped from all of them, so every test compares the same seeds.
+    The columns keep the order in which the conditions were given.
+    """
+    wide = table.pivot(index="run", columns="condition", values=metric)
+    return wide[list(dict.fromkeys(table["condition"]))].dropna()
+
+
 def friedman(table: pd.DataFrame, metric: str) -> tuple[float, float, int] | None:
     """Friedman test across conditions, one block per seed: (statistic, p, blocks).
 
     Only seeds present in every condition are used. None when there are fewer
     than 3 conditions or 2 complete seeds, where the test is undefined.
     """
-    blocks = table.pivot(index="run", columns="condition", values=metric).dropna()
+    blocks = complete_blocks(table, metric)
     if blocks.shape[1] < 3 or blocks.shape[0] < 2:
         return None
     statistic, p = friedmanchisquare(*(blocks[c] for c in blocks.columns))
@@ -152,8 +196,154 @@ def planned_comparisons(
     return list(zip(others, p_values, holm(p_values), strict=True))
 
 
+def rank_biserial(differences: npt.NDArray) -> float:
+    """Matched-pairs rank-biserial correlation of the differences A - B, -1 to 1.
+
+    Rank the seeds by the size of their difference; r is the rank sum of the
+    seeds where A was higher minus that of the seeds where A was lower, over
+    all ranks (Kerby 2014). So -1 means A was lower (better) on every seed and
+    0 no tendency either way. It is the effect size that belongs to the
+    Wilcoxon test, built from the same signed ranks: 0 exactly when the test
+    statistic sits at its null mean. A12 (probabilities.py) would ignore the
+    pairing these tests rest on. A zero difference adds its rank to both sides,
+    as the test does, so ties pull r towards 0.
+    """
+    ranks = rankdata(np.abs(differences))
+    return float((np.sign(differences) * ranks).sum() / ranks.sum())
+
+
+def signed_rank_p(differences: npt.NDArray) -> float:
+    """Two-sided p of the Wilcoxon signed-rank test, exact even with ties.
+
+    The seeds are ranked by the size of their difference (midranks for equal
+    sizes). Under the null hypothesis every nonzero difference is as likely
+    positive as negative, so the exact p is the share of all 2^m sign patterns
+    of the m nonzero differences whose signed rank sum is at least as far from
+    0 as the observed one. The distribution of that sum is counted exactly over
+    doubled ranks, which are whole numbers. A zero difference keeps its rank
+    and adds nothing to the sum, which is scipy's "zsplit". scipy's own exact
+    method allows no ties and otherwise falls back to a normal approximation:
+    with 20 seeds all favouring A and two of them tied, it gives 8.8e-5
+    instead of the exact 1.9e-6. Above 50 nonzero differences (counts beyond
+    float precision) that approximation is used here too. If every seed ties,
+    p is 1.
+    """
+    ranks = rankdata(np.abs(differences))
+    signs = np.sign(differences)
+    weights = np.rint(2 * ranks[signs != 0]).astype(int)
+    if len(weights) == 0:
+        return 1.0
+    if len(weights) > EXACT_UP_TO:
+        return float(wilcoxon(differences, zero_method="zsplit").pvalue)
+    observed = abs(int(np.rint(2 * (signs * ranks).sum())))
+    total = int(weights.sum())
+    counts = np.zeros(2 * total + 1)  # how many sign patterns give each sum
+    counts[total] = 1.0
+    for weight in weights:
+        counts = np.roll(counts, weight) + np.roll(counts, -weight)
+    distance = np.abs(np.arange(-total, total + 1))
+    return float(counts[distance >= observed].sum() / counts.sum())
+
+
+def paired_comparisons(table: pd.DataFrame, metric: str) -> list[PairedTest]:
+    """Every pair of conditions on one metric: Wilcoxon signed-rank tests by seed.
+
+    Each test is two-sided on the per-seed differences A - B over the complete
+    seeds only (`complete_blocks`), Holm-corrected across all the pairs of this
+    metric, with exact p-values (`signed_rank_p`). A seed on which A and B tie
+    exactly keeps its rank, split between the two signs (scipy's "zsplit"): a
+    tie is evidence of no difference, which the textbook rule of dropping it
+    would throw away. Demšar (2006) also keeps ties, though he drops one zero
+    when their number is odd. A condition with no values for this metric (say,
+    no unseen test yet) is left out rather than emptying the whole table. Empty
+    when there are fewer than 2 conditions or 2 complete seeds.
+    """
+    if metric not in table:
+        return []
+    blocks = complete_blocks(table.dropna(subset=[metric]), metric)
+    if blocks.shape[1] < 2 or blocks.shape[0] < 2:
+        return []
+    pairs = list(combinations(blocks.columns, 2))
+    differences = [
+        np.round((blocks[a] - blocks[b]).to_numpy(), DIFFERENCE_DECIMALS)
+        for a, b in pairs
+    ]
+    p_values = [signed_rank_p(d) for d in differences]
+    return [
+        PairedTest(
+            metric, a, b, len(blocks), float(np.median(d)), rank_biserial(d), p, p_holm
+        )
+        for (a, b), d, p, p_holm in zip(
+            pairs, differences, p_values, holm(p_values), strict=True
+        )
+    ]
+
+
+def format_p(p: float) -> str:
+    """A p-value to 4 decimals, or in scientific notation when smaller."""
+    return f"{p:.4f}" if p >= 1e-4 else f"{p:.1e}"
+
+
+def paired_report(table: pd.DataFrame) -> list[str]:
+    """The all-pairs Wilcoxon tests as Markdown lines, one table per metric."""
+    lines = [
+        "## All pairs, paired by seed",
+        "",
+        "Two-sided Wilcoxon signed-rank tests on the per-seed differences A − B, with",
+        "exact p-values, Holm-corrected across the pairs of each metric. A seed missing",
+        "from any condition is dropped from all, so every pair compares the same seeds;",
+        "a seed on which A and B tie counts half for each side. Lower is better: a",
+        "negative median difference or r means A did better. r is the matched-pairs",
+        "rank-biserial correlation (−1: A better on every seed). **Bold**: below",
+        f"{ALPHA} after Holm.",
+    ]
+    for metric in PAIRED_METRICS:
+        if metric not in table or table[metric].isna().all():
+            continue
+        tests = paired_comparisons(table, metric)
+        blocks = complete_blocks(table.dropna(subset=[metric]), metric)
+        lines += ["", f"### {metric}: {len(blocks)} seeds in every condition", ""]
+        left_out = [c for c in dict.fromkeys(table["condition"]) if c not in blocks]
+        if left_out:
+            lines += [
+                f"Left out, no values for this metric: {', '.join(left_out)}.",
+                "",
+            ]
+        dropped = sorted(set(table["run"]) - set(blocks.index))
+        if dropped:
+            lines += [
+                f"Dropped, missing from some condition: {', '.join(dropped)}.",
+                "",
+            ]
+        if not tests:
+            lines.append("Needs ≥ 2 conditions and ≥ 2 seeds present in every one.")
+            continue
+        # With n seeds the most extreme outcome, every seed on one side and no
+        # ties, has p = 2 / 2^n; Holm multiplies the smallest p by the pair count.
+        smallest = 2.0 / 2 ** len(blocks)
+        after_holm = min(1.0, len(tests) * smallest)
+        verdict = ", so no pair can be significant here" if after_holm >= ALPHA else ""
+        lines += [
+            f"With {len(blocks)} seeds the smallest possible p is 2 / 2^{len(blocks)} "
+            f"= {format_p(smallest)}, {format_p(after_holm)} after Holm over "
+            f"{len(tests)} pairs{verdict}.",
+            "",
+            "| A vs B | median A − B | r | p | p (Holm) |",
+            "|---|---|---|---|---|",
+        ]
+        for test in tests:
+            p_holm = format_p(test.p_holm)
+            if test.p_holm < ALPHA:
+                p_holm = f"**{p_holm}**"
+            lines.append(
+                f"| {test.a} vs {test.b} | {test.median_difference:+.3f} | "
+                f"{test.rank_biserial:+.2f} | {format_p(test.p)} | {p_holm} |"
+            )
+    return lines
+
+
 def stats_report(table: pd.DataFrame, reference: str) -> str:
-    """The Friedman tests and planned comparisons, as Markdown."""
+    """The Friedman tests, planned comparisons and all-pairs tests, as Markdown."""
     lines = [
         "## Friedman test across all conditions (blocked by seed)",
         "",
@@ -183,6 +373,7 @@ def stats_report(table: pd.DataFrame, reference: str) -> str:
                 lines.append(
                     f"| {metric} | {other} vs {reference} | {p:.4f} | {p_holm:.4f} |"
                 )
+    lines += ["", *paired_report(table)]
     return "\n".join(lines) + "\n"
 
 
@@ -328,6 +519,10 @@ def main() -> None:
     summary = summary_markdown(table, args.threshold, budget)
     (args.out / "summary.md").write_text(summary)
     (args.out / "stats.md").write_text(stats_report(table, args.reference))
+    paired = [test for m in PAIRED_METRICS for test in paired_comparisons(table, m)]
+    pd.DataFrame(paired, columns=PairedTest._fields).to_csv(
+        args.out / "paired_tests.csv", index=False
+    )
 
     drawn = draw_convergence(curves, grid, args.threshold, args.out / "convergence.png")
     print(summary)

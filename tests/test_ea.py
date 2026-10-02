@@ -17,7 +17,7 @@ from pathlib import Path
 import mujoco as mj
 import numpy as np
 import pytest
-from ariel.ec import FloatMutator, set_seed
+from ariel.ec import FloatMutator, Population, set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 
 from ea import (
@@ -346,3 +346,270 @@ def test_headless_crosses_with_a_random_genotype(
     child = experiment.make_child(members, np.zeros(config.island_size), sigma=0.0)
     assert child.shape == (length,)
     assert bool(np.any(child != 0.0)) == brings_new_genes
+
+
+def test_a_run_can_start_from_saved_genotypes(tmp_path: Path, pool: Pool) -> None:
+    """`init_from` deals saved networks round-robin over the islands, so each
+    island gets its share; random networks fill every other slot (experiment X)."""
+    saved = np.random.default_rng(5).normal(size=(4, TINY_SIM.genotype_length))
+    np.save(tmp_path / "saved.npy", saved)
+    config = replace(tiny_config("best"), init_from=str(tmp_path / "saved.npy"))
+    experiment = Experiment(
+        config, TINY_SIM, tmp_path, pool, world_factory=SimpleFlatWorld
+    )
+    population = experiment.initial_population()
+    assert len(population) == config.n_islands * config.island_size
+    for k, genotype in enumerate(saved):
+        island = population_of(population, k % config.n_islands)
+        assert island[k // config.n_islands] == genotype.tolist()
+    from_file = [ind.genotype for ind in population if ind.genotype in saved.tolist()]
+    assert len(from_file) == len(saved)
+
+
+def test_without_init_from_the_first_population_is_unchanged(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """Every slot is a random draw, in island order, as before `init_from`
+    existed: earlier runs still reproduce exactly."""
+    config = tiny_config("best")
+    population = Experiment(
+        config, TINY_SIM, tmp_path, pool, world_factory=SimpleFlatWorld
+    ).initial_population()
+    fresh = Experiment(config, TINY_SIM, tmp_path, pool, world_factory=SimpleFlatWorld)
+    expected = [
+        fresh.random_individual().tolist()
+        for _ in range(config.n_islands * config.island_size)
+    ]
+    assert [ind.genotype for ind in population] == expected
+
+
+@pytest.mark.parametrize(
+    ("rows", "length", "message"),
+    [
+        (2, TINY_SIM.genotype_length + 1, "weights"),
+        (13, TINY_SIM.genotype_length, "population"),
+    ],
+)
+def test_init_from_rejects_genotypes_that_do_not_fit(
+    rows: int, length: int, message: str, tmp_path: Path, pool: Pool
+) -> None:
+    np.save(tmp_path / "saved.npy", np.zeros((rows, length)))
+    config = replace(tiny_config("best"), init_from=str(tmp_path / "saved.npy"))
+    with pytest.raises(ValueError, match=message):
+        Experiment(config, TINY_SIM, tmp_path, pool, world_factory=SimpleFlatWorld)
+
+
+def test_init_from_is_for_the_island_ea_only() -> None:
+    config = replace(EAConfig(), algorithm="random_search", init_from="saved.npy")
+    with pytest.raises(ValueError, match="init_from"):
+        check_config(config)
+
+
+def population_of(population: Population, island: int) -> list[list[float]]:
+    """The genotypes on one island, in population order."""
+    return [ind.genotype for ind in population if ind.tags["island"] == island]
+
+
+def test_an_interrupted_run_resumes_where_its_database_ends(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """`resume` continues from the last saved generation: the log goes on
+    without a gap or a repeat, the best brain is kept, and the old database
+    is kept beside the new one."""
+    out = tmp_path / "run"
+    config = replace(tiny_config("best"), max_evaluations=30)  # generations 0-2
+    run_tiny(config, out, pool)
+    best_before = np.load(out / "best_genotype.npy")
+    (out / "summary.json").unlink()  # as if the power went out after generation 2
+
+    longer = replace(config, max_evaluations=48)  # resuming may extend the budget
+    Experiment(
+        longer, TINY_SIM, out, pool, world_factory=SimpleFlatWorld, resume=True
+    ).evolve()
+
+    with (out / "log.csv").open() as handle:
+        rows = [row for row in csv.DictReader(handle) if row["island"] == "all"]
+    assert [int(row["generation"]) for row in rows] == [0, 1, 2, 3, 4]
+    assert [int(row["evaluations"]) for row in rows] == [12, 21, 30, 39, 48]
+    best = [float(row["best_final"]) for row in rows]
+    assert all(later <= earlier for earlier, later in pairwise(best))
+    if best[-1] == best[2]:
+        np.testing.assert_array_equal(np.load(out / "best_genotype.npy"), best_before)
+    assert (out / "database_part1.db").exists() and (out / "database.db").exists()
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["generations"] == 4 and summary["evaluations"] == 48
+
+
+def test_resume_refuses_a_run_with_other_settings(tmp_path: Path, pool: Pool) -> None:
+    out = tmp_path / "run"
+    run_tiny(tiny_config("best"), out, pool)
+    (out / "summary.json").unlink()
+    with pytest.raises(ValueError, match="other settings"):
+        Experiment(
+            tiny_config("worst"),
+            TINY_SIM,
+            out,
+            pool,
+            world_factory=SimpleFlatWorld,
+            resume=True,
+        )
+
+
+def test_resume_without_a_database_starts_fresh(tmp_path: Path, pool: Pool) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    Experiment(
+        tiny_config("best"),
+        TINY_SIM,
+        out,
+        pool,
+        world_factory=SimpleFlatWorld,
+        resume=True,
+    ).evolve()
+    assert (out / "summary.json").exists()
+
+
+def interrupted_run(tmp_path: Path, pool: Pool) -> tuple[Path, EAConfig]:
+    """A tiny finished run (generations 0-2), made to look cut off."""
+    out = tmp_path / "run"
+    config = replace(tiny_config("best"), max_evaluations=30)
+    run_tiny(config, out, pool)
+    (out / "summary.json").unlink()
+    return out, replace(config, max_evaluations=48)
+
+
+def logged_generations(out: Path) -> list[int]:
+    with (out / "log.csv").open() as handle:
+        rows = csv.DictReader(handle)
+        return [int(row["generation"]) for row in rows if row["island"] == "all"]
+
+
+def resume(config: EAConfig, out: Path, pool: Pool) -> Experiment:
+    return Experiment(
+        config, TINY_SIM, out, pool, world_factory=SimpleFlatWorld, resume=True
+    )
+
+
+def test_a_log_that_fell_behind_the_database_sets_where_to_resume(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """A power cut can lose log lines the database kept (logs written before
+    they were put on disk): the run continues from the log's last generation,
+    so the evaluation count, and with it the budget, stays right."""
+    out, longer = interrupted_run(tmp_path, pool)
+    lines = (out / "log.csv").read_text().splitlines(keepends=True)
+    rows_per_generation = tiny_config("best").n_islands + 1
+    (out / "log.csv").write_text("".join(lines[: 1 + 2 * rows_per_generation]))
+    experiment = resume(longer, out, pool)
+    assert (experiment.generation, experiment.evaluations) == (1, 21)
+    assert len(experiment.resumed or []) == 12
+    experiment.evolve()
+    assert logged_generations(out) == [0, 1, 2, 3, 4]
+    assert json.loads((out / "summary.json").read_text())["evaluations"] == 48
+
+
+def test_a_log_ahead_of_the_database_is_cut_back(tmp_path: Path, pool: Pool) -> None:
+    """The lost generation's log rows go; the run picks up after generation 2."""
+    out, longer = interrupted_run(tmp_path, pool)
+    lines = (out / "log.csv").read_text().splitlines(keepends=True)
+    ahead = [line.replace("2,30,", "3,39,", 1) for line in lines[-4:]]
+    (out / "log.csv").write_text("".join(lines + ahead))
+    experiment = resume(longer, out, pool)
+    assert (experiment.generation, experiment.evaluations) == (2, 30)
+    assert logged_generations(out) == [0, 1, 2]
+
+
+def test_a_refused_resume_changes_nothing(tmp_path: Path, pool: Pool) -> None:
+    out, longer = interrupted_run(tmp_path, pool)
+    header = (out / "log.csv").read_text().splitlines(keepends=True)[0]
+    (out / "log.csv").write_text(header)  # e.g. a log lost entirely
+    with pytest.raises(ValueError, match="no finished generation"):
+        resume(longer, out, pool)
+    assert (out / "database.db").exists()
+    assert not list(out.glob("database_part*.db"))
+
+
+def test_a_cut_during_a_resume_continues_from_the_set_aside_database(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """Stopped after the old database became a part, before a new one held a
+    generation: the next resume reads the part instead of starting over."""
+    out, longer = interrupted_run(tmp_path, pool)
+    (out / "database.db").rename(out / "database_part1.db")
+    experiment = resume(longer, out, pool)
+    assert experiment.generation == 2
+    experiment.evolve()
+    assert logged_generations(out) == [0, 1, 2, 3, 4]
+    assert sorted(p.name for p in out.glob("database*.db")) == [
+        "database.db",
+        "database_part1.db",
+    ]
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["resumed_after"] == [2]
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [("stall_generations", 3), ("final_duration", 0.6), ("curriculum", True)],
+)
+def test_runs_with_state_outside_the_database_cannot_resume(
+    setting: str, value: object, tmp_path: Path, pool: Pool
+) -> None:
+    out = tmp_path / "run"
+    config = replace(tiny_config("best"), max_evaluations=30, **{setting: value})
+    run_tiny(config, out, pool)
+    (out / "summary.json").unlink()
+    with pytest.raises(ValueError, match="state the database does not hold"):
+        Experiment(
+            config, TINY_SIM, out, pool, world_factory=SimpleFlatWorld, resume=True
+        )
+    assert (out / "database.db").exists()
+
+
+def test_a_fresh_start_removes_every_output_of_an_earlier_run(
+    tmp_path: Path, pool: Pool
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    for stale in ("longer_walks.json", "unseen_30s.json", "database_part1.db"):
+        (out / stale).write_text("{}")
+    Experiment(tiny_config("none"), TINY_SIM, out, pool, world_factory=SimpleFlatWorld)
+    assert not any(
+        (out / stale).exists()
+        for stale in ("longer_walks.json", "unseen_30s.json", "database_part1.db")
+    )
+
+
+def test_a_resume_does_not_need_the_init_from_file(tmp_path: Path, pool: Pool) -> None:
+    saved = tmp_path / "saved.npy"
+    np.save(saved, np.zeros((2, TINY_SIM.genotype_length)))
+    out = tmp_path / "run"
+    config = replace(tiny_config("best"), max_evaluations=30, init_from=str(saved))
+    run_tiny(config, out, pool)
+    (out / "summary.json").unlink()
+    saved.unlink()  # moved or deleted since the run started
+    assert resume(config, out, pool).generation == 2
+
+
+def test_a_resumed_best_keeps_its_exact_fitness(tmp_path: Path, pool: Pool) -> None:
+    """The log rounds to 4 decimals; the database's best is exact."""
+    out, longer = interrupted_run(tmp_path, pool)
+    experiment = resume(longer, out, pool)
+    with (out / "log.csv").open() as handle:
+        logged = [float(r["best_final"]) for r in csv.DictReader(handle)]
+    assert experiment.best_fitness == pytest.approx(min(logged), abs=5e-5)
+    assert experiment.best_fitness != round(experiment.best_fitness, 4)
+    np.testing.assert_array_equal(
+        np.load(out / "best_genotype.npy"), experiment.best_genotype
+    )
+
+
+def test_a_fresh_start_removes_an_old_database_journal(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """A crash during a save leaves a journal; a new database must not replay it."""
+    out = tmp_path / "run"
+    out.mkdir()
+    (out / "database.db-journal").write_text("old")
+    Experiment(tiny_config("none"), TINY_SIM, out, pool, world_factory=SimpleFlatWorld)
+    assert not (out / "database.db-journal").exists()

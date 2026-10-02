@@ -3,7 +3,16 @@
 import numpy as np
 import pytest
 
-from network import NetworkShape, forward, pack, parse_hidden, random_genotype, unpack
+from network import (
+    NetworkShape,
+    forward,
+    layers,
+    pack,
+    parse_hidden,
+    random_genotype,
+    run_layers,
+    unpack,
+)
 
 SHAPE = NetworkShape(n_inputs=5, hidden=(3,), n_outputs=4)
 DEEP = NetworkShape(n_inputs=5, hidden=(3, 2), n_outputs=4)
@@ -64,3 +73,16 @@ def test_parse_hidden() -> None:
     assert parse_hidden("8,8") == (8, 8)
     with pytest.raises(ValueError, match="hidden layers"):
         parse_hidden("0")
+
+
+def test_layers_run_exactly_like_forward() -> None:
+    """A walk cuts its network up once (`layers`) and runs it 750 times; the
+    outputs must be bit-identical to `forward`, or the fitness would change."""
+    rng = np.random.default_rng(2)
+    genotype = random_genotype(DEEP, rng)
+    network = layers(genotype, DEEP)
+    for _ in range(5):
+        inputs = rng.normal(size=5)
+        np.testing.assert_array_equal(
+            run_layers(network, inputs), forward(genotype, DEEP, inputs)
+        )

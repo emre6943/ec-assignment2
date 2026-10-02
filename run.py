@@ -87,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--out", type=Path, default=None, help="default: results/<condition>"
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue an unfinished run (crash, power cut) from its database",
+    )
 
     for config_class in (EAConfig, SimConfig):
         for field in fields(config_class):
@@ -221,14 +226,20 @@ def main() -> None:
             console.rule(f"[bold]{condition}  seed {seed}  ->  {out}")
             # Every condition with this seed walks the same terrain(s).
             terrain_dir = terrain_folder(out_root.parent, args.world, args.body, seed)
-            Experiment(
+            experiment = Experiment(
                 ea_config,
                 sim_config,
                 out,
                 pool,
                 world_factory=WORLDS[args.world],
                 terrain_dir=terrain_dir,
-            ).evolve()
+                resume=args.resume,
+            )
+            if experiment.resumed is not None:
+                # Fresh random streams, not a replay of the run's first ones
+                # (+ 1: a resume after generation 0 must not reuse the seed).
+                seed_everything(seed + 1009 * (experiment.generation + 1))
+            experiment.evolve()
 
 
 if __name__ == "__main__":

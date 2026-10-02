@@ -15,14 +15,17 @@ parallel or were paused.
 | development | 69 (3 unfinished) | 797,352 | 870,024 | 3,239.4 | 20.7 | 1,593 |
 | tuning | 111 | 833,004 | 833,004 | 3,343.9 | 14.5 | 1,626 |
 | final | 45 | 541,440 | 541,440 | 2,269.1 | 6.4 | 2,070 |
-| **total** | 225 (3 unfinished) | 2,171,796 | 2,244,468 | 8,852.4 | 41.5 | 5,289 |
+| showcase | 1 | 360,080 | 360,080 | 1,500.6 | 5.9 | 46 |
+| **total** | 226 (3 unfinished) | 2,531,876 | 2,604,548 | 10,353.0 | 47.4 | 5,335 |
 
 - **development**: building and debugging the problem (world, body, fitness,
   inputs, walk length): experiments 1-6, 8-11, 13, 15-18, 20, 21.
 - **tuning**: choosing the EA's and the brain's settings by controlled
   comparisons: experiments 7, 12, 19, 19b, 22-25, 29.
-- **final**: the research-question experiment 14, and 26's follow-up on the
-  migration interval.
+- **final**: the research-question experiments: 14, 26's follow-up on the
+  migration interval, and 99, the final experiment.
+- **showcase**: experiment X, one long seeded run for the best walk; not part
+  of the research.
 
 ## By experiment
 
@@ -55,3 +58,4 @@ parallel or were paused.
 | 25 (tuning) | 9 | 54,504 | 54,504 | 227.9 | 0.6 | 189 |
 | 26 (final) | 15 | 180,480 | 180,480 | 756.4 | 2.2 | 690 |
 | 29 (tuning) | 25 | 300,800 | 300,800 | 1,255.5 | 3.5 | 525 |
+| X (showcase) | 1 | 360,080 | 360,080 | 1,500.6 | 5.9 | 46 |

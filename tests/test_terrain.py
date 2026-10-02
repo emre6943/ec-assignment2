@@ -12,6 +12,7 @@ from terrain import (
     SPAWN_CLEARANCE,
     ground_geoms,
     ground_height,
+    mesh_boxes,
 )
 
 
@@ -73,3 +74,19 @@ def test_ariel_spawn_settles_like_ours_on_olympic_arena(
     (ours_start, ours_rest), (ariel_start, ariel_rest) = heights
     assert ariel_start == pytest.approx(ours_start - 0.01, abs=1e-3)
     assert ariel_rest == pytest.approx(ours_rest, abs=1e-3)
+
+
+def test_skipping_mesh_pieces_outside_their_box_keeps_every_height(
+    olympic: tuple[mj.MjModel, mj.MjData],
+) -> None:
+    """`mesh_boxes` only skips vertical rays that would miss anyway, so the
+    ground height is exactly the same everywhere, on and off the arena."""
+    model, data = olympic
+    ground = ground_geoms(model)
+    boxes = mesh_boxes(model, data, ground)
+    assert boxes  # OlympicArena has mesh pieces
+    for x in np.linspace(-1.0, 6.0, 36):
+        for y in np.linspace(-2.0, 2.0, 9):
+            assert ground_height(model, data, ground, x, y, boxes) == ground_height(
+                model, data, ground, x, y
+            )
