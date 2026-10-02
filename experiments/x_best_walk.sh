@@ -9,8 +9,8 @@
 #       other 35 start random.
 # How long: 5,000 generations instead of 166. Generation 0 walks all 80,
 #       every later one walks its 72 children (the 8 elites keep their
-#       score), so the budget is 80 + 5,000 x 72 = 360,080 walks: about 4.5
-#       hours on a 10-core Mac.
+#       score), so the budget is 80 + 5,000 x 72 = 360,080 walks: about 6
+#       hours on a 10-core Mac (5.9 h on 2026-10-02).
 # Where: a fresh OlympicArena that none of the 45 brains has seen
 #       (results/x/terrains/). With one arena, the brain may learn this one
 #       strip by heart (D10), so the blind test below is the real verdict.

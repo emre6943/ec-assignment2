@@ -20,16 +20,22 @@
 # (best / worst / random / none / standard / random_search) x 20 seeds = 120
 # runs of 12,000 evaluations. The runs go seed by seed, so a run stopped early
 # still leaves complete paired blocks of all six conditions. About 9 minutes
-# a run, 17 hours in all, on emre-server (measured 2026-10-02: 14 and 20
+# a run, 18 hours in all, on emre-server (measured 2026-10-02: 14 and 20
 # workers are equally fast there, and two runs side by side gain nothing).
 # WORKERS sets the pool size (default: every CPU).
 #
-# On emre-server, as a user service that survives logging out (from the
-# assignment2 folder; `systemctl --user stop ec-final` stops it, starting it
-# again resumes):
-#   systemd-run --user --unit=ec-final --working-directory="$PWD" \
+# On emre-server, as a user service that survives logging out, from the
+# assignment2 folder:
+#   systemd-run --user --unit=ec-final --collect --working-directory="$PWD" \
 #       --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" \
-#       bash -c 'bash experiments/99_final_experiment.sh > results/final_driver.log 2>&1'
+#       bash -c 'bash experiments/99_final_experiment.sh >> results/final_driver.log 2>&1'
+# Follow it with `tail -f results/final/*.log`; each run's progress and any
+# error (e.g. a refused resume) land in its condition's log. `systemctl --user
+# stop ec-final` stops it; the same systemd-run command continues it later.
+#
+# Afterwards, copy results/final/ back to the Mac (e.g. rsync) and run
+# `compute_ledger.py` there: docs/compute.md needs every experiment's runs,
+# and the server holds only this one's.
 #
 # Unseen test (D14): unseen.py reuses results/terrains/olympic/test/spider_8/
 # when it exists. On another machine, copy that folder from the Mac first, so
@@ -37,7 +43,9 @@
 #
 # Re-running skips finished runs and resumes a cut-off one from its last saved
 # generation (--resume). Pass seeds as arguments to run a subset, e.g.
-# `99_final_experiment.sh 10 11`; the analysis then covers those seeds.
+# `99_final_experiment.sh 10 11`. The unseen test then covers those seeds, but
+# analyze.py, probabilities.py and longer_walks.py read every seed*/ under
+# results/final/ (the statistics keep only seeds complete in all six conditions).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -85,4 +93,3 @@ py=(uv run --project ../ariel python)
 "${py[@]}" probabilities.py "${conditions[@]}" --out "$out/probabilities.md"
 "${py[@]}" longer_walks.py "${conditions[@]}" --workers "$workers" \
     --out "$out/longer_walks"
-"${py[@]}" compute_ledger.py

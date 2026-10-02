@@ -236,8 +236,9 @@ def main() -> None:
                 resume=args.resume,
             )
             if experiment.resumed is not None:
-                # Fresh random streams, not a replay of the run's first ones.
-                seed_everything(seed + 1009 * experiment.generation)
+                # Fresh random streams, not a replay of the run's first ones
+                # (+ 1: a resume after generation 0 must not reuse the seed).
+                seed_everything(seed + 1009 * (experiment.generation + 1))
             experiment.evolve()
 
 

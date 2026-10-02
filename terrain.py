@@ -26,6 +26,7 @@ template's `SPAWN_POS`); `world.spawn()` is called through its normal API.
 # Third-party libraries
 import mujoco as mj
 import numpy as np
+import numpy.typing as npt
 
 # The core cube's centre sits this far above the robot's lowest point at rest
 # (true for every John Set body except iguana, whose core ARIEL places 1.6 cm
@@ -34,7 +35,8 @@ CORE_ABOVE_LOWEST_POINT: float = 0.075
 REACH_MARGIN: float = 0.06  # beyond the outermost module centre
 SPAWN_CLEARANCE: float = 0.02  # gap between the robot and the highest ground under it
 RAY_START_Z: float = 100.0  # vertical rays for the ground height start this high
-DOWN = np.array([0.0, 0.0, -1.0])
+DOWN: npt.NDArray[np.float64] = np.array([0.0, 0.0, -1.0])  # vertical rays
+DOWN.flags.writeable = False
 
 
 def ground_geoms(model: mj.MjModel) -> tuple[int, ...]:

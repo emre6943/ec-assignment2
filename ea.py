@@ -29,6 +29,7 @@ ariel.ec traps this file works around (verified):
 # Standard library
 import csv
 import json
+import os
 import shutil
 import time
 from collections.abc import Callable
@@ -40,8 +41,9 @@ from typing import Literal
 # Third-party libraries
 import numpy as np
 import numpy.typing as npt
-from sqlalchemy import func
-from sqlmodel import Session, create_engine, select
+from sqlalchemy import func, or_
+from sqlalchemy.exc import DatabaseError
+from sqlmodel import Session, col, create_engine, select
 
 # Local libraries (ARIEL)
 from ariel import console
@@ -72,6 +74,19 @@ type Algorithm = Literal["island", "random_search"]
 type TerrainMode = Literal["per_run", "per_generation"]
 type CrossoverKind = Literal["neuron", "weight", "blx", "headless"]
 CROSSOVERS: tuple[str, ...] = ("neuron", "weight", "blx", "headless")
+
+# Outputs of an earlier run in the same folder. A fresh start removes them, or
+# they would survive and be read as this run's (by analyze.py, longer_walks.py,
+# or a later --resume). ariel would delete database.db itself, but only once
+# generation 0 has been walked.
+STALE_OUTPUTS: tuple[str, ...] = (
+    "summary.json",
+    "unseen*.json",
+    "longer_walks.json",
+    "best_genotype*.npy",
+    "database*.db",
+    "resumes.json",
+)
 
 # The parts of a Score stored as tags on every individual, next to its fitness.
 SCORE_PARTS: tuple[str, ...] = tuple(Score.__dataclass_fields__)
@@ -286,6 +301,39 @@ def saved_genotypes(path: str, length: int, room: int) -> list[Genotype]:
     return list(genotypes)
 
 
+def save_durably(path: Path, array: npt.NDArray[np.float64]) -> None:
+    """`np.save`, but the file is complete on disk before it replaces the old one.
+
+    After a power cut the old file or the new one is there, never half of one;
+    `Experiment.restore` reads it.
+    """
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as handle:
+        np.save(handle, array)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def last_generation(database: Path) -> int | None:
+    """The last generation a run's database holds; None if it holds none."""
+    if not database.exists():
+        return None
+    engine = create_engine(f"sqlite:///{database}")
+    try:
+        with Session(engine) as session:
+            return session.exec(select(func.max(Individual.time_of_death))).one()
+    except DatabaseError:  # no table yet: the run stopped while creating it
+        return None
+    finally:
+        engine.dispose()
+
+
+def part_number(database: Path) -> int:
+    """N of `database_part<N>.db`."""
+    return int(database.stem.removeprefix("database_part"))
+
+
 def island_members(population: Population, island: int) -> list[Individual]:
     """The living individuals on one island."""
     return [
@@ -319,11 +367,7 @@ class Experiment:
         check_config(config)
         self.config = config
         self.sim = sim
-        self.init_genotypes = saved_genotypes(
-            config.init_from,
-            sim.genotype_length,
-            config.n_islands * config.island_size,
-        )
+        self.init_genotypes: list[Genotype] = []  # `init_from`, read on a fresh start
         self.out = out
         self.pool = pool
         self.world_factory = world_factory  # replaced only in tests
@@ -356,19 +400,19 @@ class Experiment:
 
         self.log_path = out / "log.csv"
         self.resumed: Population | None = None
-        database = out / "database.db"
-        if resume and database.exists() and not (out / "summary.json").exists():
-            self.resumed = self.restore(database, world_factory.__name__)
+        source = self.resumable_database() if resume else None
+        if source is not None:
+            self.resumed = self.restore(source, world_factory.__name__)
         else:
-            # Outputs of an earlier run in the same folder would otherwise
-            # survive and be read as this run's (e.g. by analyze.py).
-            for stale in (
-                "summary.json",
-                "unseen.json",
-                "best_genotype.npy",
-                "best_genotype_short.npy",
-            ):
-                (out / stale).unlink(missing_ok=True)
+            # Checked before anything is removed; a resumed run never needs it.
+            self.init_genotypes = saved_genotypes(
+                config.init_from,
+                sim.genotype_length,
+                config.n_islands * config.island_size,
+            )
+            for pattern in STALE_OUTPUTS:
+                for stale in out.glob(pattern):
+                    stale.unlink()
             with self.log_path.open("w", newline="") as handle:
                 csv.writer(handle).writerow(LOG_COLUMNS)
         (out / "config.json").write_text(
@@ -383,77 +427,169 @@ class Experiment:
             )
         )
 
-    def restore(self, database: Path, world: str) -> Population:
-        """Pick up an unfinished run (a crash, a power cut) where its database ends.
+    def resumable_database(self) -> Path | None:
+        """The database an unfinished run continues from; None to start afresh.
 
-        ariel.ec commits every finished generation, so the database holds the
-        living population of the last one; the generation in progress when
-        the run stopped is lost and simply runs again. The settings must be
-        the run's own (only `max_evaluations` may grow). The log is cut back
-        to the last saved generation, the best network so far is kept, and
-        the old database is kept as `database_part<N>.db` while a new
-        `database.db` records the rest. The random streams cannot be
-        restored, so a resumed run is not identical to one that never stopped.
+        Normally `database.db`. If the run stopped during a resume - after the
+        old database was set aside as `database_part<N>.db`, before ariel saved
+        a generation in the new one - it is the newest part.
         """
+        if (self.out / "summary.json").exists():
+            return None
+        parts = sorted(self.out.glob("database_part*.db"), key=part_number)
+        for database in (self.out / "database.db", *reversed(parts)):
+            if last_generation(database) is not None:
+                return database
+        return None
+
+    def restore(self, database: Path, world: str) -> Population:
+        """Pick up an unfinished run (a crash, a power cut) where it stopped.
+
+        ariel.ec saves every finished generation in the database, and `log`
+        puts that generation's log rows (and any new best network) on disk
+        just before, so after a cut the log ends on the database's last
+        generation or on the one after it, which was lost. The run continues
+        from the last generation both hold; the lost one simply runs again.
+        (A log written before it was put on disk at every generation may end
+        a few generations early; the run then continues from the log's end,
+        so the evaluation count stays right.)
+
+        The population is that generation's individuals: born in it, and
+        alive at its end (not replaced by immigrants). ariel's own
+        `EA(restart=...)` is not used because it also brings back the
+        generation's dead parents and the individuals replaced by migration.
+        The best network so far is the better of the logged best and the
+        database's. Everything is read and checked before anything changes, so
+        a refused or failed resume leaves the run as it was. Then the old
+        database is kept as `database_part<N>.db`, a new `database.db`
+        records the rest, and `resumes.json` lists every resume.
+
+        The settings must be the run's own (only `max_evaluations` may grow).
+        A curriculum, longer walks (D21) or the stagnation rule (D19) keep
+        state the database does not hold, so such runs cannot resume. The
+        random streams cannot be restored either: a resumed run is not
+        identical to one that never stopped.
+        """
+        config = self.config
+        if config.curriculum or config.final_duration > 0 or config.stall_generations:
+            msg = (
+                f"resume: {self.out} uses a curriculum, longer walks or the "
+                "stagnation rule, whose state the database does not hold"
+            )
+            raise ValueError(msg)
         saved = json.loads((self.out / "config.json").read_text())
         saved_ea = replace(
-            EAConfig(**saved["ea"]), max_evaluations=self.config.max_evaluations
+            EAConfig(**saved["ea"]), max_evaluations=config.max_evaluations
         )
         if (
-            saved_ea != self.config
+            saved_ea != config
             or saved_sim_config(saved["sim"]) != self.sim
             or saved.get("world") != world
         ):
             msg = f"resume: {self.out} was run with other settings"
             raise ValueError(msg)
 
+        logged = self.read_log()
+        everyone = [row for row in logged if row["island"] == "all"]
+        saved_last = last_generation(database)
+        if not everyone or saved_last is None:
+            msg = f"resume: {self.out} holds no finished generation"
+            raise ValueError(msg)
+        generation = min(saved_last, max(int(row["generation"]) for row in everyone))
+
         engine = create_engine(f"sqlite:///{database}")
         with Session(engine) as session:
-            generation = session.exec(select(func.max(Individual.time_of_death))).one()
-            rows = session.exec(select(Individual).where(Individual.alive)).all()
+            rows = session.exec(
+                select(Individual)
+                .where(Individual.time_of_birth == generation)
+                .where(or_(Individual.time_of_death > generation, Individual.alive))
+            ).all()
             population = []
             for row in rows:
-                if row.time_of_death != generation or row.requires_eval:
-                    msg = f"resume: {database} does not end on a finished generation"
-                    raise ValueError(msg)
                 tags = dict(row.tags)
                 individual = new_individual(
                     row.genotype, int(tags.pop("island")), **tags
                 )
                 individual.fitness = row.fitness
                 population.append(individual)
+            champion = session.exec(
+                select(Individual)
+                .where(col(Individual.fitness_).is_not(None))
+                .order_by(col(Individual.fitness_))
+                .limit(1)
+            ).one()
+            saved_best = (float(champion.fitness), list(champion.genotype))
         engine.dispose()
-        part = 1
-        while (self.out / f"database_part{part}.db").exists():
-            part += 1
-        database.rename(self.out / f"database_part{part}.db")
+        if len(population) != config.n_islands * config.island_size:
+            msg = f"resume: {database} does not hold all of generation {generation}"
+            raise ValueError(msg)
 
-        with self.log_path.open() as handle:
-            logged = list(csv.DictReader(handle))
-        # The log may already hold the lost generation; its best network was
-        # saved, so it still counts towards the best so far.
-        self.best_fitness = min(
-            float(row["best_final"]) for row in logged if row["island"] == "all"
-        )
+        # The logged best may come from the lost generation; its network was
+        # put on disk with the log, unless the cut came in between.
+        best_fitness, best_genotype = saved_best
+        logged_best = min(float(row["best_final"]) for row in everyone)
+        try:
+            if logged_best <= best_fitness:
+                best_fitness = logged_best
+                best_genotype = np.load(self.out / "best_genotype.npy").tolist()
+        except (OSError, ValueError):
+            best_fitness, best_genotype = saved_best
         kept = [row for row in logged if int(row["generation"]) <= generation]
-        with self.log_path.open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, LOG_COLUMNS)
-            writer.writeheader()
-            writer.writerows(kept)
-        last = kept[-1]
-        if (self.out / "best_genotype.npy").exists():
-            self.best_genotype = np.load(self.out / "best_genotype.npy").tolist()
+        last = next(
+            row
+            for row in kept
+            if row["island"] == "all" and int(row["generation"]) == generation
+        )
+
+        # Everything checked: only now change the run's files.
+        self.write_log(kept)
+        save_durably(self.out / "best_genotype.npy", np.asarray(best_genotype))
+        if database.name == "database.db":
+            parts = [part_number(part) for part in self.out.glob("database_part*.db")]
+            database.rename(self.out / f"database_part{max(parts, default=0) + 1}.db")
+        else:  # resuming from a part: a database.db left here holds nothing
+            (self.out / "database.db").unlink(missing_ok=True)
+        resumes_file = self.out / "resumes.json"
+        resumes = json.loads(resumes_file.read_text()) if resumes_file.exists() else []
+        resumes.append(
+            {
+                "after_generation": generation,
+                "evaluations": int(last["evaluations"]),
+                "from": database.name,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        resumes_file.write_text(json.dumps(resumes, indent=2))
 
         self.generation = generation
         self.evaluations = int(last["evaluations"])
+        self.best_fitness = best_fitness
+        self.best_genotype = best_genotype
         self.started_at = time.time() - float(last["seconds"])
-        self.rng = np.random.default_rng((self.config.seed, 1, generation))
+        self.rng = np.random.default_rng((config.seed, 1, generation))
         console.print(
             f"resuming {self.out} after generation {generation} "
             f"({self.evaluations} evaluations, best {self.best_fitness:.3f})",
             highlight=False,
         )
         return Population(population)
+
+    def read_log(self) -> list[dict[str, str]]:
+        """The log's rows, without a last line that a crash cut short."""
+        with self.log_path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        return [row for row in rows if None not in row and None not in row.values()]
+
+    def write_log(self, rows: list[dict[str, str]]) -> None:
+        """Replace the log with these rows, all at once (see `save_durably`)."""
+        temporary = self.log_path.with_name(self.log_path.name + ".tmp")
+        with temporary.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, LOG_COLUMNS)
+            writer.writeheader()
+            writer.writerows(rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, self.log_path)
 
     # -- Operations -------------------------------------------------------- #
 
@@ -750,8 +886,12 @@ class Experiment:
             rows.append(self.stats_row(str(island), members, self.island_sigma[island]))
         rows.append(self.stats_row("all", everyone, float(np.mean(self.island_sigma))))
 
+        # On disk before ariel saves this generation in the database, so the
+        # log never falls behind the database (`restore` relies on it).
         with self.log_path.open("a", newline="") as handle:
             csv.writer(handle).writerows(rows)
+            handle.flush()
+            os.fsync(handle.fileno())
 
         # The run's best is always judged by the FINAL fitness (no movement
         # reward), so a curriculum stage can never crown a different "best".
@@ -763,7 +903,7 @@ class Experiment:
             self.best_fitness = float(fitness[best])
             self.best_genotype = list(everyone[best].genotype)
             # Saved on every improvement, so a stopped run keeps its best.
-            np.save(self.out / "best_genotype.npy", np.asarray(self.best_genotype))
+            save_durably(self.out / "best_genotype.npy", np.asarray(self.best_genotype))
 
         champion = everyone[best].tags
         console.print(
@@ -868,14 +1008,16 @@ class Experiment:
         while self.evaluations < self.config.max_evaluations:
             ea.step()
 
-        (self.out / "summary.json").write_text(
-            json.dumps(
-                {
-                    "generations": self.generation,
-                    "evaluations": self.evaluations,
-                    "best_fitness_seen": self.best_fitness,
-                    "seconds": round(time.time() - self.started_at, 1),
-                },
-                indent=2,
-            )
-        )
+        summary: dict[str, object] = {
+            "generations": self.generation,
+            "evaluations": self.evaluations,
+            "best_fitness_seen": self.best_fitness,
+            "seconds": round(time.time() - self.started_at, 1),
+        }
+        resumes = self.out / "resumes.json"
+        if resumes.exists():
+            # A resumed run cannot be reproduced exactly; say so where it ends.
+            summary["resumed_after"] = [
+                resume["after_generation"] for resume in json.loads(resumes.read_text())
+            ]
+        (self.out / "summary.json").write_text(json.dumps(summary, indent=2))

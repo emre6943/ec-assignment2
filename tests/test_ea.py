@@ -467,3 +467,125 @@ def test_resume_without_a_database_starts_fresh(tmp_path: Path, pool: Pool) -> N
         resume=True,
     ).evolve()
     assert (out / "summary.json").exists()
+
+
+def interrupted_run(tmp_path: Path, pool: Pool) -> tuple[Path, EAConfig]:
+    """A tiny finished run (generations 0-2), made to look cut off."""
+    out = tmp_path / "run"
+    config = replace(tiny_config("best"), max_evaluations=30)
+    run_tiny(config, out, pool)
+    (out / "summary.json").unlink()
+    return out, replace(config, max_evaluations=48)
+
+
+def logged_generations(out: Path) -> list[int]:
+    with (out / "log.csv").open() as handle:
+        rows = csv.DictReader(handle)
+        return [int(row["generation"]) for row in rows if row["island"] == "all"]
+
+
+def resume(config: EAConfig, out: Path, pool: Pool) -> Experiment:
+    return Experiment(
+        config, TINY_SIM, out, pool, world_factory=SimpleFlatWorld, resume=True
+    )
+
+
+def test_a_log_that_fell_behind_the_database_sets_where_to_resume(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """A power cut can lose log lines the database kept (logs written before
+    they were put on disk): the run continues from the log's last generation,
+    so the evaluation count, and with it the budget, stays right."""
+    out, longer = interrupted_run(tmp_path, pool)
+    lines = (out / "log.csv").read_text().splitlines(keepends=True)
+    rows_per_generation = tiny_config("best").n_islands + 1
+    (out / "log.csv").write_text("".join(lines[: 1 + 2 * rows_per_generation]))
+    experiment = resume(longer, out, pool)
+    assert (experiment.generation, experiment.evaluations) == (1, 21)
+    assert len(experiment.resumed or []) == 12
+    experiment.evolve()
+    assert logged_generations(out) == [0, 1, 2, 3, 4]
+    assert json.loads((out / "summary.json").read_text())["evaluations"] == 48
+
+
+def test_a_log_ahead_of_the_database_is_cut_back(tmp_path: Path, pool: Pool) -> None:
+    """The lost generation's log rows go; the run picks up after generation 2."""
+    out, longer = interrupted_run(tmp_path, pool)
+    lines = (out / "log.csv").read_text().splitlines(keepends=True)
+    ahead = [line.replace("2,30,", "3,39,", 1) for line in lines[-4:]]
+    (out / "log.csv").write_text("".join(lines + ahead))
+    experiment = resume(longer, out, pool)
+    assert (experiment.generation, experiment.evaluations) == (2, 30)
+    assert logged_generations(out) == [0, 1, 2]
+
+
+def test_a_refused_resume_changes_nothing(tmp_path: Path, pool: Pool) -> None:
+    out, longer = interrupted_run(tmp_path, pool)
+    header = (out / "log.csv").read_text().splitlines(keepends=True)[0]
+    (out / "log.csv").write_text(header)  # e.g. a log lost entirely
+    with pytest.raises(ValueError, match="no finished generation"):
+        resume(longer, out, pool)
+    assert (out / "database.db").exists()
+    assert not list(out.glob("database_part*.db"))
+
+
+def test_a_cut_during_a_resume_continues_from_the_set_aside_database(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """Stopped after the old database became a part, before a new one held a
+    generation: the next resume reads the part instead of starting over."""
+    out, longer = interrupted_run(tmp_path, pool)
+    (out / "database.db").rename(out / "database_part1.db")
+    experiment = resume(longer, out, pool)
+    assert experiment.generation == 2
+    experiment.evolve()
+    assert logged_generations(out) == [0, 1, 2, 3, 4]
+    assert sorted(p.name for p in out.glob("database*.db")) == [
+        "database.db",
+        "database_part1.db",
+    ]
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["resumed_after"] == [2]
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [("stall_generations", 3), ("final_duration", 0.6), ("curriculum", True)],
+)
+def test_runs_with_state_outside_the_database_cannot_resume(
+    setting: str, value: object, tmp_path: Path, pool: Pool
+) -> None:
+    out = tmp_path / "run"
+    config = replace(tiny_config("best"), max_evaluations=30, **{setting: value})
+    run_tiny(config, out, pool)
+    (out / "summary.json").unlink()
+    with pytest.raises(ValueError, match="state the database does not hold"):
+        Experiment(
+            config, TINY_SIM, out, pool, world_factory=SimpleFlatWorld, resume=True
+        )
+    assert (out / "database.db").exists()
+
+
+def test_a_fresh_start_removes_every_output_of_an_earlier_run(
+    tmp_path: Path, pool: Pool
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    for stale in ("longer_walks.json", "unseen_30s.json", "database_part1.db"):
+        (out / stale).write_text("{}")
+    Experiment(tiny_config("none"), TINY_SIM, out, pool, world_factory=SimpleFlatWorld)
+    assert not any(
+        (out / stale).exists()
+        for stale in ("longer_walks.json", "unseen_30s.json", "database_part1.db")
+    )
+
+
+def test_a_resume_does_not_need_the_init_from_file(tmp_path: Path, pool: Pool) -> None:
+    saved = tmp_path / "saved.npy"
+    np.save(saved, np.zeros((2, TINY_SIM.genotype_length)))
+    out = tmp_path / "run"
+    config = replace(tiny_config("best"), max_evaluations=30, init_from=str(saved))
+    run_tiny(config, out, pool)
+    (out / "summary.json").unlink()
+    saved.unlink()  # moved or deleted since the run started
+    assert resume(config, out, pool).generation == 2

@@ -20,7 +20,7 @@ Status legend:
 | D2 | World | ✅ | `OlympicArena` since 2026-09-29, ARIEL defaults (was `RuggedTerrainWorld`: too steep to walk on; D17) |
 | D2a | Spawn height | ✅ | Experiment 14 uses ARIEL's own spawn, as in the template (`--ariel-spawn`); earlier runs spawned 2 cm above the real ground, which rests in the same pose on OlympicArena |
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
-| D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed; answered by the final experiment (99): 6 conditions × 20 fresh seeds |
+| D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed; to be answered by the final experiment (99, not run yet): 6 conditions × 20 fresh seeds |
 | D4 | Controller outputs | 🟡 | One output per hinge (8 for spider_8; 16 for spider_16), direct position control |
 | D5 | Controller inputs | ✅ | 16 for spider_8: 8 joint angles + clock (2) + target vector (3) + tilt (3); no vision since experiment 23 (the rays sensed almost nothing); absolute (x, y) tested in experiment 29 and not added (no gain in training, slightly slower and worse on unseen arenas) |
 | D6 | Network shape | ✅ (experiment 24) | Fixed MLP 16-8-4-8 (two hidden layers, a bottleneck of 4); evolve weights only (212 weights) |
@@ -41,6 +41,7 @@ Status legend:
 | D21 | Longer walks late in a run | ❌ (experiment 20) | Showcase only: 15 s then 30 s walks; did not reach the target |
 | D22 | Parameter tuning | ✅ (experiments 19, 19b) | Crossover probability 0.9; σ, population, tournament, elites and dense mutation kept |
 | D23 | Train on several situations | ❌ (experiment 21) | 3 arenas, turned starts and 20 s walks tried; nothing reached unseen targets, nothing adopted |
+| D24 | Resuming a cut-off run | ✅ (2026-10-02) | `run.py --resume` continues from the last generation saved in both the database and the log; ARIEL's own restart is not used (it revives the dead parents) |
 
 ---
 
@@ -251,11 +252,12 @@ reach p ≈ 2 × 10⁻⁶, so every pair of conditions can be compared with a pa
 Holm's correction, instead of only five planned comparisons. Experiment 14 stays in the
 log as the first version on the final setup; the paper reports 99. `analyze.py` now runs
 these tests next to the unchanged Friedman test and planned comparisons: for every pair, a
-two-sided Wilcoxon signed-rank test over the seeds complete in all six conditions,
-Holm-corrected across the 15 pairs of each metric (final fitness, AUC, unseen distance),
-with the median paired difference and the matched-pairs rank-biserial correlation (Kerby
-2014) as effect sizes; a seed where two conditions tie counts half for each side (Demšar
-2006). They go into `stats.md` and `paired_tests.csv`.
+two-sided Wilcoxon signed-rank test over the seeds complete in all six conditions, with
+exact p-values even when seeds tie, Holm-corrected across the 15 pairs of each metric
+(final fitness, AUC, unseen distance), with the median paired difference and the
+matched-pairs rank-biserial correlation (Kerby 2014) as effect sizes; a seed where two
+conditions tie counts half for each side (close to Demšar 2006, who drops one such seed
+when their number is odd). They go into `stats.md` and `paired_tests.csv`.
 
 **Only the emigrant selection changes between conditions.** Island count, island size,
 migration interval, number of migrants, topology and replacement policy stay fixed (D11).
@@ -848,7 +850,7 @@ controller walks on changes its score. Three options were considered:
 `--terrain-mode per_generation` keeps the old behaviour, which could make a "robustness"
 side experiment. `--n-terrains k` gives each seed *k* terrains, averaged per individual.
 
-## D11. Island model settings — 🟡
+## D11. Island model settings — ✅ (every 20 generations in the final experiment, 99)
 
 An **island model** splits the population into sub-populations that evolve separately and
 occasionally exchange individuals (**migration**). Isolation lets islands explore different
@@ -860,7 +862,7 @@ migrate.
 | Islands | 4 | Enough to have diversity between islands; each island still reasonably large |
 | Island size | 20 (80 in total) | ⏳ depends on the budget (D12) |
 | Topology | Ring (island *i* sends to island *i*+1) | The standard, simplest choice (Cantú-Paz 2001) |
-| Migration interval | Every 10 generations | Islands get time to diverge between exchanges |
+| Migration interval | Every 10 generations (experiment 14); **every 20 in the final experiment (99)**, see the decision below | Islands get time to diverge between exchanges |
 | Migrants per event | 2 (10% of an island) | The usual range is 5–10% |
 | Emigrant selection | **best / worst / random** | ← **the research question** |
 | Replacement on arrival | Immigrants replace the island's worst | Fixed for all conditions |
@@ -874,7 +876,7 @@ same champion within about 2,000 evaluations (experiment 20). The interval was
 deliberately not tuned (D22), since it sets the context of the research question, so
 this is a separate question on experiment 14's setup, seeds and arenas: the best policy
 migrating every 5, 20 and 50 generations; experiment 14 supplies every 10 (`best`) and
-never (`none`). Exploratory: no setting changes because of it. Measured: convergence and
+never (`none`). Planned as exploratory, with no setting to change because of it (the decision below changed that for the final experiment). Measured: convergence and
 final fitness across the five intervals, and how different the islands stay (the
 genotype spread per island, and how soon every island holds the same champion).
 Background: Cantú-Paz (2001); Skolicki & De Jong (2005).
@@ -900,16 +902,18 @@ Background: Cantú-Paz (2001); Skolicki & De Jong (2005).
   the same champion (from about 4,000 evaluations at 5, 6,800 at 10; rarely at 20; never
   at 50) and the less diverse each island stays. Every 20 keeps the islands apart while
   still sharing good solutions often enough to speed up the search.
-- One policy and 5 seeds: exploratory. Experiment 14 keeps its literature value of 10.
+- One policy and 5 seeds: exploratory. Experiment 14 keeps its literature value of 10 (superseded for the final experiment, below).
 
 **Decision (2026-10-02, Emre, after the TA session): the final experiment (99) migrates
 every 20 generations.** Every 20 had the best final fitness and unseen distance, learned
 as fast as 5 and 10, and keeps the islands apart, so the emigrant policy acts on islands
 that still differ (at every 10, all four held the same champion in 28% of the
 generations, and then it cannot matter whom they send). The evidence is modest (final
-fitness 58% against every 10, unseen 77%), and it was measured on experiment 14's seeds
-0-4, so experiment 99 runs on fresh seeds and arenas (10-29), the same tuning/test split
-as D22.
+fitness 58% against every 10, unseen 77%) and would not pass a 90% adoption rule like
+D22's. So this is a choice about the experiment's design, not a tuning win: every 20 is
+the interval at which the research question can show an effect (the islands stay apart)
+and that did no worse. It was measured on experiment 14's seeds 0-4, so experiment 99
+runs on fresh seeds and arenas (10-29), the same tuning/test split as D22.
 
 ## D12. Budget and stopping — ✅ fixed budget; size chosen from the curves
 
@@ -1606,6 +1610,32 @@ on any seed, let alone all three.
   limitation of this controller (a reactive network without a CPG, D17) and budget.
   Remedies that help in the literature (Jakobi 1997) did not help at 6,000 evaluations;
   they may need a far larger budget than this assignment allows.
+
+## D24. Resuming a cut-off run — ✅ `run.py --resume` (2026-10-02)
+
+**Why:** experiment X lost power halfway (the laptop's battery ran out), and the final
+experiment (99) runs for about 18 hours. Started again without this, a run starts from
+scratch: ariel's `EA` deletes an existing `database.db` by default.
+
+**What it does** (`Experiment.restore`): ariel saves every finished generation in the
+database; our `log` writes that generation's log rows and any new best network to disk
+just before. A resumed run continues from the last generation both hold: its population is
+the individuals born in that generation and still alive at its end. The old database is
+kept as `database_part<N>.db`, `resumes.json` and `summary.json` record every resume,
+and everything is checked before any file changes, so a refused resume leaves the run as
+it was.
+
+**Why not ariel's own restart:** `EA(restart=...)` is ariel's public way to continue from
+a database, and using it would be allowed. But it selects every individual alive at any
+point of the last generation, so it also brings back that generation's dead parents and
+the individuals replaced by immigrants (27 individuals instead of 12 in a small test).
+`restore` reads the same database through ariel's own `Individual` model instead; ariel
+itself is not changed.
+
+**Limits:** the random streams cannot be restored, so a resumed run is not identical to
+one that never stopped (it is recorded as resumed). A curriculum (D16), longer walks
+(D21) and the stagnation rule (D19) keep state the database does not hold, so such runs
+refuse to resume; none of them is used in experiment 14 or 99.
 
 ## References (to verify when writing the report)
 

@@ -27,7 +27,8 @@ OUT = Path(__file__).parent / "docs" / "compute.md"
 # "development" builds and debugs the problem (world, body, fitness, what the
 # brain sees); "tuning" chooses the EA's and the brain's settings by
 # controlled comparisons; "final" are the research-question experiments (14,
-# 26's follow-up on the migration interval, and 99, the final experiment).
+# 26's follow-up on the migration interval, and 99, the final experiment);
+# "showcase" is experiment X, one long run for the best walk, not research.
 EXPERIMENTS: list[tuple[str, str, list[str]]] = [
     ("1", "development", ["best_per_generation_terrain"]),
     ("2", "development", ["debug_flat"]),
@@ -104,6 +105,7 @@ EXPERIMENTS: list[tuple[str, str, list[str]]] = [
             for name in ("best", "worst", "random", "none", "standard")
         ],
     ),
+    ("X", "showcase", ["x/standard"]),
     (
         "99",
         "final",
@@ -113,7 +115,7 @@ EXPERIMENTS: list[tuple[str, str, list[str]]] = [
         ],
     ),
 ]
-PHASES = ("development", "tuning", "final")
+PHASES = ("development", "tuning", "final", "showcase")
 
 
 @dataclass
@@ -256,8 +258,10 @@ def main() -> None:
         "  inputs, walk length): experiments 1-6, 8-11, 13, 15-18, 20, 21.",
         "- **tuning**: choosing the EA's and the brain's settings by controlled",
         "  comparisons: experiments 7, 12, 19, 19b, 22-25, 29.",
-        "- **final**: the research-question experiment 14, and 26's follow-up on the",
-        "  migration interval.",
+        "- **final**: the research-question experiments: 14, 26's follow-up on the",
+        "  migration interval, and 99, the final experiment.",
+        "- **showcase**: experiment X, one long seeded run for the best walk; not part",
+        "  of the research.",
         "",
         "## By experiment",
         "",

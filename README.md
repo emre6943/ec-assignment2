@@ -109,12 +109,15 @@ already finished, so an interrupted one can simply be started again:
     bash experiments/28_longer_walks.sh          # 15 / 20 / 30 / 60 s test walks
     bash experiments/29_absolute_position.sh     # 14 again, brains also told their (x, y)
 
-**The final experiment** (about 17 hours; its header has the command that runs it on
+**The final experiment** (about 18 hours; its header has the command that runs it on
 emre-server as a service). A run that was cut off (crash, power cut) continues from its
 last saved generation when the script is started again (`run.py --resume`):
 
     bash experiments/99_final_experiment.sh      # 6 conditions x 20 seeds (10-29)
     WORKERS=8 bash experiments/99_final_experiment.sh 10 11   # fewer workers, two seeds
+
+With seeds given, only those seeds run and get the unseen test; the analysis at the end
+still reads every seed in `results/final/`.
 
 **Watch a brain walk.** `replay.py` saves an `.mp4` in the run's folder and prints how far
 from the target the robot ended:

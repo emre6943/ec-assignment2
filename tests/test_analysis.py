@@ -14,6 +14,7 @@ from analyze import (
     planned_comparisons,
     rank_biserial,
     run_metrics,
+    signed_rank_p,
     stats_report,
     summary_markdown,
 )
@@ -310,3 +311,32 @@ def test_the_ledger_counts_longer_walks(tmp_path: Path) -> None:
     (tmp_path / "longer_walks.json").write_text(json.dumps(walks))
     tally = run_tally(tmp_path)
     assert (tally.test_walks, tally.test_simulated_s) == (2, 32.5)
+
+
+def test_signed_rank_p_is_exact_with_and_without_ties() -> None:
+    """Without ties it equals scipy's exact test; with ties and zeros, scipy's
+    exact permutation test (too slow for 20 seeds, fine for 8)."""
+    from scipy.stats import PermutationMethod, wilcoxon
+
+    clean = np.random.default_rng(1).normal(-0.1, 0.1, 12)
+    assert signed_rank_p(clean) == pytest.approx(wilcoxon(clean, method="exact").pvalue)
+    tied = np.array([-0.3, -0.1, 0.1, -0.2, -0.2, 0.0, -0.4, 0.05])
+    exact = PermutationMethod(n_resamples=np.inf)
+    assert signed_rank_p(tied) == pytest.approx(
+        wilcoxon(tied, zero_method="zsplit", method=exact).pvalue
+    )
+    # 20 seeds all favouring A, two of them tied: still the extreme 2 / 2^20.
+    one_sided = -np.arange(1, 21) / 100
+    one_sided[1] = one_sided[0]
+    assert signed_rank_p(one_sided) == pytest.approx(2 / 2**20)
+    assert signed_rank_p(np.zeros(5)) == 1.0
+
+
+def test_a_condition_without_the_metric_is_left_out() -> None:
+    """No unseen test yet for one condition: the others are still compared."""
+    table = make_seeds({"a": -0.1, "b": 0.0, "c": 0.0})
+    table["unseen_distance"] = table["final_fitness"]
+    table.loc[table["condition"] == "c", "unseen_distance"] = np.nan
+    (test,) = paired_comparisons(table, "unseen_distance")
+    assert (test.a, test.b, test.pairs) == ("a", "b", 20)
+    assert "Left out, no values for this metric: c." in stats_report(table, "b")

@@ -80,6 +80,7 @@ ALPHA = 0.05
 # The logs keep 4 decimals; rounding the differences stops float noise in the
 # subtraction from splitting what are really tied differences (scipy's advice).
 DIFFERENCE_DECIMALS = 9
+EXACT_UP_TO = 50  # nonzero differences; 2^50 still counts exactly in a float
 INCOMPLETE_RUN_SHARE = 0.95  # a run that stopped below this share of its budget
 
 
@@ -211,22 +212,55 @@ def rank_biserial(differences: npt.NDArray) -> float:
     return float((np.sign(differences) * ranks).sum() / ranks.sum())
 
 
+def signed_rank_p(differences: npt.NDArray) -> float:
+    """Two-sided p of the Wilcoxon signed-rank test, exact even with ties.
+
+    The seeds are ranked by the size of their difference (midranks for equal
+    sizes). Under the null hypothesis every nonzero difference is as likely
+    positive as negative, so the exact p is the share of all 2^m sign patterns
+    of the m nonzero differences whose signed rank sum is at least as far from
+    0 as the observed one. The distribution of that sum is counted exactly over
+    doubled ranks, which are whole numbers. A zero difference keeps its rank
+    and adds nothing to the sum, which is scipy's "zsplit". scipy's own exact
+    method allows no ties and otherwise falls back to a normal approximation:
+    with 20 seeds all favouring A and two of them tied, it gives 8.8e-5
+    instead of the exact 1.9e-6. Above 50 nonzero differences (counts beyond
+    float precision) that approximation is used here too. If every seed ties,
+    p is 1.
+    """
+    ranks = rankdata(np.abs(differences))
+    signs = np.sign(differences)
+    weights = np.rint(2 * ranks[signs != 0]).astype(int)
+    if len(weights) == 0:
+        return 1.0
+    if len(weights) > EXACT_UP_TO:
+        return float(wilcoxon(differences, zero_method="zsplit").pvalue)
+    observed = abs(int(np.rint(2 * (signs * ranks).sum())))
+    total = int(weights.sum())
+    counts = np.zeros(2 * total + 1)  # how many sign patterns give each sum
+    counts[total] = 1.0
+    for weight in weights:
+        counts = np.roll(counts, weight) + np.roll(counts, -weight)
+    distance = np.abs(np.arange(-total, total + 1))
+    return float(counts[distance >= observed].sum() / counts.sum())
+
+
 def paired_comparisons(table: pd.DataFrame, metric: str) -> list[PairedTest]:
     """Every pair of conditions on one metric: Wilcoxon signed-rank tests by seed.
 
     Each test is two-sided on the per-seed differences A - B over the complete
     seeds only (`complete_blocks`), Holm-corrected across all the pairs of this
-    metric. A seed on which A and B tie exactly keeps its rank, split between
-    the two signs (scipy's "zsplit", as Demšar 2006 recommends): a tie is
-    evidence of no difference, which the textbook rule of dropping it would
-    throw away. If every seed ties, p is 1. The p-value is scipy's default:
-    exact when no differences tie; otherwise exact permutations up to 13 seeds
-    and the normal approximation, corrected for ties, above. Empty when the
-    metric is missing or there are fewer than 2 conditions or 2 complete seeds.
+    metric, with exact p-values (`signed_rank_p`). A seed on which A and B tie
+    exactly keeps its rank, split between the two signs (scipy's "zsplit"): a
+    tie is evidence of no difference, which the textbook rule of dropping it
+    would throw away. Demšar (2006) also keeps ties, though he drops one zero
+    when their number is odd. A condition with no values for this metric (say,
+    no unseen test yet) is left out rather than emptying the whole table. Empty
+    when there are fewer than 2 conditions or 2 complete seeds.
     """
     if metric not in table:
         return []
-    blocks = complete_blocks(table, metric)
+    blocks = complete_blocks(table.dropna(subset=[metric]), metric)
     if blocks.shape[1] < 2 or blocks.shape[0] < 2:
         return []
     pairs = list(combinations(blocks.columns, 2))
@@ -234,7 +268,7 @@ def paired_comparisons(table: pd.DataFrame, metric: str) -> list[PairedTest]:
         np.round((blocks[a] - blocks[b]).to_numpy(), DIFFERENCE_DECIMALS)
         for a, b in pairs
     ]
-    p_values = [float(wilcoxon(d, zero_method="zsplit").pvalue) for d in differences]
+    p_values = [signed_rank_p(d) for d in differences]
     return [
         PairedTest(
             metric, a, b, len(blocks), float(np.median(d)), rank_biserial(d), p, p_holm
@@ -256,7 +290,7 @@ def paired_report(table: pd.DataFrame) -> list[str]:
         "## All pairs, paired by seed",
         "",
         "Two-sided Wilcoxon signed-rank tests on the per-seed differences A − B,",
-        "Holm-corrected across the pairs of each metric. A seed missing from any",
+        "exact p-values, Holm-corrected across the pairs of each metric. A seed missing from any",
         "condition is dropped from all, so every pair compares the same seeds; a seed on",
         "which A and B tie counts half for each side. Lower is better: a negative median",
         "difference or r means A did better. r is the matched-pairs rank-biserial",
@@ -266,8 +300,14 @@ def paired_report(table: pd.DataFrame) -> list[str]:
         if metric not in table or table[metric].isna().all():
             continue
         tests = paired_comparisons(table, metric)
-        blocks = complete_blocks(table, metric)
+        blocks = complete_blocks(table.dropna(subset=[metric]), metric)
         lines += ["", f"### {metric}: {len(blocks)} seeds in every condition", ""]
+        left_out = [c for c in dict.fromkeys(table["condition"]) if c not in blocks]
+        if left_out:
+            lines += [
+                f"Left out, no values for this metric: {', '.join(left_out)}.",
+                "",
+            ]
         dropped = sorted(set(table["run"]) - set(blocks.index))
         if dropped:
             lines += [
