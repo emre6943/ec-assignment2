@@ -20,7 +20,7 @@ Status legend:
 | D2 | World | ✅ | `OlympicArena` since 2026-09-29, ARIEL defaults (was `RuggedTerrainWorld`: too steep to walk on; D17) |
 | D2a | Spawn height | ✅ | Experiment 14 uses ARIEL's own spawn, as in the template (`--ariel-spawn`); earlier runs spawned 2 cm above the real ground, which rests in the same pose on OlympicArena |
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
-| D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed |
+| D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed; answered by the final experiment (99): 6 conditions × 20 fresh seeds |
 | D4 | Controller outputs | 🟡 | One output per hinge (8 for spider_8; 16 for spider_16), direct position control |
 | D5 | Controller inputs | ✅ | 16 for spider_8: 8 joint angles + clock (2) + target vector (3) + tilt (3); no vision since experiment 23 (the rays sensed almost nothing); absolute (x, y) tested in experiment 29 and not added (no gain in training, slightly slower and worse on unseen arenas) |
 | D6 | Network shape | ✅ (experiment 24) | Fixed MLP 16-8-4-8 (two hidden layers, a bottleneck of 4); evolve weights only (212 weights) |
@@ -28,7 +28,7 @@ Status legend:
 | D8 | Mutation | ✅ (pilot) | Gaussian perturbation of every weight, σ = 0.05 |
 | D9 | Selection | 🟡 | Tournament (parents) + generational with elitism (survivors) |
 | D10 | Terrain and noisy fitness | ✅ | One fixed terrain per seed, shared by all conditions with that seed |
-| D11 | Island model settings | 🟡 | 4 islands, ring, migrate every 10 generations, replace worst; every 5-20 learned equally fast in experiment 26, so 10 stays |
+| D11 | Island model settings | ✅ | 4 islands, ring, 2 migrants replace the worst; every 10 generations in experiment 14, **every 20 in the final experiment (99)** after experiment 26 |
 | D12 | Budget and stopping | ✅ rule / 🟡 size | Fixed budget of 12,000 evaluations per run; 15 s training walks on OlympicArena; the final brains are also tested with 20-60 s walks (step 28) |
 | D13 | Baselines and controls | 🟡 | Random search + no-migration islands |
 | D14 | Final evaluation | 🟡 | Best controllers re-tested on unseen terrains; for OlympicArena after experiment 14 |
@@ -243,6 +243,13 @@ cannot be measured directly. Instead we report:
   can (5 × 0.008 = 0.04).
 - A paired Wilcoxon test is no use either: its smallest possible p with 5 pairs is 0.06.
 - **More seeds** would allow more comparisons, if compute allows.
+
+**Final experiment (99, decided 2026-10-02 after the TA session asked for firmer
+statistics):** experiment 14's six conditions on 20 fresh seeds (10-29, new arenas),
+migrating every 20 generations (D11). With 20 paired seeds a paired Wilcoxon test can
+reach p ≈ 2 × 10⁻⁶, so every pair of conditions can be compared with a paired test and
+Holm's correction, instead of only five planned comparisons. Experiment 14 stays in the
+log as the first version on the final setup; the paper reports 99.
 
 **Only the emigrant selection changes between conditions.** Island count, island size,
 migration interval, number of migrants, topology and replacement policy stay fixed (D11).
@@ -888,6 +895,15 @@ Background: Cantú-Paz (2001); Skolicki & De Jong (2005).
   at 50) and the less diverse each island stays. Every 20 keeps the islands apart while
   still sharing good solutions often enough to speed up the search.
 - One policy and 5 seeds: exploratory. Experiment 14 keeps its literature value of 10.
+
+**Decision (2026-10-02, Emre, after the TA session): the final experiment (99) migrates
+every 20 generations.** Every 20 had the best final fitness and unseen distance, learned
+as fast as 5 and 10, and keeps the islands apart, so the emigrant policy acts on islands
+that still differ (at every 10, all four held the same champion in 28% of the
+generations, and then it cannot matter whom they send). The evidence is modest (final
+fitness 58% against every 10, unseen 77%), and it was measured on experiment 14's seeds
+0-4, so experiment 99 runs on fresh seeds and arenas (10-29), the same tuning/test split
+as D22.
 
 ## D12. Budget and stopping — ✅ fixed budget; size chosen from the curves
 

@@ -27,7 +27,7 @@ OUT = Path(__file__).parent / "docs" / "compute.md"
 # "development" builds and debugs the problem (world, body, fitness, what the
 # brain sees); "tuning" chooses the EA's and the brain's settings by
 # controlled comparisons; "final" are the research-question experiments (14,
-# and 26's follow-up on the migration interval).
+# 26's follow-up on the migration interval, and 99, the final experiment).
 EXPERIMENTS: list[tuple[str, str, list[str]]] = [
     ("1", "development", ["best_per_generation_terrain"]),
     ("2", "development", ["debug_flat"]),
@@ -102,6 +102,14 @@ EXPERIMENTS: list[tuple[str, str, list[str]]] = [
         [
             f"olympic/pos_{name}"
             for name in ("best", "worst", "random", "none", "standard")
+        ],
+    ),
+    (
+        "99",
+        "final",
+        [
+            f"final/{name}"
+            for name in ("best", "worst", "random", "none", "standard", "random_search")
         ],
     ),
 ]
