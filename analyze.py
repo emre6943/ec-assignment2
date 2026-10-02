@@ -289,12 +289,13 @@ def paired_report(table: pd.DataFrame) -> list[str]:
     lines = [
         "## All pairs, paired by seed",
         "",
-        "Two-sided Wilcoxon signed-rank tests on the per-seed differences A − B,",
-        "exact p-values, Holm-corrected across the pairs of each metric. A seed missing from any",
-        "condition is dropped from all, so every pair compares the same seeds; a seed on",
-        "which A and B tie counts half for each side. Lower is better: a negative median",
-        "difference or r means A did better. r is the matched-pairs rank-biserial",
-        f"correlation (−1: A better on every seed). **Bold**: below {ALPHA} after Holm.",
+        "Two-sided Wilcoxon signed-rank tests on the per-seed differences A − B, with",
+        "exact p-values, Holm-corrected across the pairs of each metric. A seed missing",
+        "from any condition is dropped from all, so every pair compares the same seeds;",
+        "a seed on which A and B tie counts half for each side. Lower is better: a",
+        "negative median difference or r means A did better. r is the matched-pairs",
+        "rank-biserial correlation (−1: A better on every seed). **Bold**: below",
+        f"{ALPHA} after Holm.",
     ]
     for metric in PAIRED_METRICS:
         if metric not in table or table[metric].isna().all():

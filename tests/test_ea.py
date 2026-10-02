@@ -589,3 +589,27 @@ def test_a_resume_does_not_need_the_init_from_file(tmp_path: Path, pool: Pool) -
     (out / "summary.json").unlink()
     saved.unlink()  # moved or deleted since the run started
     assert resume(config, out, pool).generation == 2
+
+
+def test_a_resumed_best_keeps_its_exact_fitness(tmp_path: Path, pool: Pool) -> None:
+    """The log rounds to 4 decimals; the database's best is exact."""
+    out, longer = interrupted_run(tmp_path, pool)
+    experiment = resume(longer, out, pool)
+    with (out / "log.csv").open() as handle:
+        logged = [float(r["best_final"]) for r in csv.DictReader(handle)]
+    assert experiment.best_fitness == pytest.approx(min(logged), abs=5e-5)
+    assert experiment.best_fitness != round(experiment.best_fitness, 4)
+    np.testing.assert_array_equal(
+        np.load(out / "best_genotype.npy"), experiment.best_genotype
+    )
+
+
+def test_a_fresh_start_removes_an_old_database_journal(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """A crash during a save leaves a journal; a new database must not replay it."""
+    out = tmp_path / "run"
+    out.mkdir()
+    (out / "database.db-journal").write_text("old")
+    Experiment(tiny_config("none"), TINY_SIM, out, pool, world_factory=SimpleFlatWorld)
+    assert not (out / "database.db-journal").exists()

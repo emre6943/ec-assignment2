@@ -876,9 +876,10 @@ same champion within about 2,000 evaluations (experiment 20). The interval was
 deliberately not tuned (D22), since it sets the context of the research question, so
 this is a separate question on experiment 14's setup, seeds and arenas: the best policy
 migrating every 5, 20 and 50 generations; experiment 14 supplies every 10 (`best`) and
-never (`none`). Planned as exploratory, with no setting to change because of it (the decision below changed that for the final experiment). Measured: convergence and
-final fitness across the five intervals, and how different the islands stay (the
-genotype spread per island, and how soon every island holds the same champion).
+never (`none`). Planned as exploratory, with no setting to change because of it (the
+decision below changed that for the final experiment). Measured: convergence and final
+fitness across the five intervals, and how different the islands stay (the genotype
+spread per island, and how soon every island holds the same champion).
 Background: Cantú-Paz (2001); Skolicki & De Jong (2005).
 
 **Results (experiment 26, 2026-10-01; probabilities from step 27, paired by seed):**
@@ -902,7 +903,8 @@ Background: Cantú-Paz (2001); Skolicki & De Jong (2005).
   the same champion (from about 4,000 evaluations at 5, 6,800 at 10; rarely at 20; never
   at 50) and the less diverse each island stays. Every 20 keeps the islands apart while
   still sharing good solutions often enough to speed up the search.
-- One policy and 5 seeds: exploratory. Experiment 14 keeps its literature value of 10 (superseded for the final experiment, below).
+- One policy and 5 seeds: exploratory. Experiment 14 keeps its literature value of 10
+  (superseded for the final experiment, below).
 
 **Decision (2026-10-02, Emre, after the TA session): the final experiment (99) migrates
 every 20 generations.** Every 20 had the best final fitness and unseen distance, learned
@@ -1635,7 +1637,9 @@ itself is not changed.
 **Limits:** the random streams cannot be restored, so a resumed run is not identical to
 one that never stopped (it is recorded as resumed). A curriculum (D16), longer walks
 (D21) and the stagnation rule (D19) keep state the database does not hold, so such runs
-refuse to resume; none of them is used in experiment 14 or 99.
+refuse to resume; none of them is used in experiment 14 or 99. Only unfinished runs
+resume: a finished run (it has a `summary.json`) started again with a larger budget starts
+over.
 
 ## References (to verify when writing the report)
 

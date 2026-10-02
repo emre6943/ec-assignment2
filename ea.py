@@ -85,8 +85,10 @@ STALE_OUTPUTS: tuple[str, ...] = (
     "longer_walks.json",
     "best_genotype*.npy",
     "database*.db",
+    "database*.db-journal",
     "resumes.json",
 )
+LOG_ROUNDING = 5e-5  # the log keeps fitness to 4 decimals
 
 # The parts of a Score stored as tags on every individual, next to its fitness.
 SCORE_PARTS: tuple[str, ...] = tuple(Score.__dataclass_fields__)
@@ -465,10 +467,12 @@ class Experiment:
         records the rest, and `resumes.json` lists every resume.
 
         The settings must be the run's own (only `max_evaluations` may grow).
-        A curriculum, longer walks (D21) or the stagnation rule (D19) keep
-        state the database does not hold, so such runs cannot resume. The
-        random streams cannot be restored either: a resumed run is not
-        identical to one that never stopped.
+        Only an unfinished run resumes: a finished one (with a summary.json)
+        started again with a larger budget starts over. A curriculum, longer
+        walks (D21) or the stagnation rule (D19) keep state the database does
+        not hold, so such runs cannot resume. The random streams cannot be
+        restored either: a resumed run is not identical to one that never
+        stopped.
         """
         config = self.config
         if config.curriculum or config.final_duration > 0 or config.stall_generations:
@@ -524,16 +528,17 @@ class Experiment:
             msg = f"resume: {database} does not hold all of generation {generation}"
             raise ValueError(msg)
 
-        # The logged best may come from the lost generation; its network was
-        # put on disk with the log, unless the cut came in between.
+        # The database's best is exact. Only a logged best that beats it by
+        # more than the log's rounding is better: it comes from the lost
+        # generation, whose network `log` saved before writing the row.
         best_fitness, best_genotype = saved_best
         logged_best = min(float(row["best_final"]) for row in everyone)
-        try:
-            if logged_best <= best_fitness:
-                best_fitness = logged_best
+        if logged_best < best_fitness - LOG_ROUNDING:
+            try:
                 best_genotype = np.load(self.out / "best_genotype.npy").tolist()
-        except (OSError, ValueError):
-            best_fitness, best_genotype = saved_best
+                best_fitness = logged_best
+            except (OSError, ValueError):
+                best_fitness, best_genotype = saved_best
         kept = [row for row in logged if int(row["generation"]) <= generation]
         last = next(
             row
@@ -886,13 +891,6 @@ class Experiment:
             rows.append(self.stats_row(str(island), members, self.island_sigma[island]))
         rows.append(self.stats_row("all", everyone, float(np.mean(self.island_sigma))))
 
-        # On disk before ariel saves this generation in the database, so the
-        # log never falls behind the database (`restore` relies on it).
-        with self.log_path.open("a", newline="") as handle:
-            csv.writer(handle).writerows(rows)
-            handle.flush()
-            os.fsync(handle.fileno())
-
         # The run's best is always judged by the FINAL fitness (no movement
         # reward), so a curriculum stage can never crown a different "best".
         fitness = np.array(
@@ -904,6 +902,14 @@ class Experiment:
             self.best_genotype = list(everyone[best].genotype)
             # Saved on every improvement, so a stopped run keeps its best.
             save_durably(self.out / "best_genotype.npy", np.asarray(self.best_genotype))
+
+        # On disk after the best network and before ariel saves this generation
+        # in the database: a logged best always has its network saved, and the
+        # log never falls behind the database (`restore` relies on both).
+        with self.log_path.open("a", newline="") as handle:
+            csv.writer(handle).writerows(rows)
+            handle.flush()
+            os.fsync(handle.fileno())
 
         champion = everyone[best].tags
         console.print(
