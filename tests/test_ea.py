@@ -17,7 +17,7 @@ from pathlib import Path
 import mujoco as mj
 import numpy as np
 import pytest
-from ariel.ec import FloatMutator, set_seed
+from ariel.ec import FloatMutator, Population, set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 
 from ea import (
@@ -346,3 +346,124 @@ def test_headless_crosses_with_a_random_genotype(
     child = experiment.make_child(members, np.zeros(config.island_size), sigma=0.0)
     assert child.shape == (length,)
     assert bool(np.any(child != 0.0)) == brings_new_genes
+
+
+def test_a_run_can_start_from_saved_genotypes(tmp_path: Path, pool: Pool) -> None:
+    """`init_from` deals saved networks round-robin over the islands, so each
+    island gets its share; random networks fill every other slot (experiment X)."""
+    saved = np.random.default_rng(5).normal(size=(4, TINY_SIM.genotype_length))
+    np.save(tmp_path / "saved.npy", saved)
+    config = replace(tiny_config("best"), init_from=str(tmp_path / "saved.npy"))
+    experiment = Experiment(
+        config, TINY_SIM, tmp_path, pool, world_factory=SimpleFlatWorld
+    )
+    population = experiment.initial_population()
+    assert len(population) == config.n_islands * config.island_size
+    for k, genotype in enumerate(saved):
+        island = population_of(population, k % config.n_islands)
+        assert island[k // config.n_islands] == genotype.tolist()
+    from_file = [ind.genotype for ind in population if ind.genotype in saved.tolist()]
+    assert len(from_file) == len(saved)
+
+
+def test_without_init_from_the_first_population_is_unchanged(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """Every slot is a random draw, in island order, as before `init_from`
+    existed: earlier runs still reproduce exactly."""
+    config = tiny_config("best")
+    population = Experiment(
+        config, TINY_SIM, tmp_path, pool, world_factory=SimpleFlatWorld
+    ).initial_population()
+    fresh = Experiment(config, TINY_SIM, tmp_path, pool, world_factory=SimpleFlatWorld)
+    expected = [
+        fresh.random_individual().tolist()
+        for _ in range(config.n_islands * config.island_size)
+    ]
+    assert [ind.genotype for ind in population] == expected
+
+
+@pytest.mark.parametrize(
+    ("rows", "length", "message"),
+    [
+        (2, TINY_SIM.genotype_length + 1, "weights"),
+        (13, TINY_SIM.genotype_length, "population"),
+    ],
+)
+def test_init_from_rejects_genotypes_that_do_not_fit(
+    rows: int, length: int, message: str, tmp_path: Path, pool: Pool
+) -> None:
+    np.save(tmp_path / "saved.npy", np.zeros((rows, length)))
+    config = replace(tiny_config("best"), init_from=str(tmp_path / "saved.npy"))
+    with pytest.raises(ValueError, match=message):
+        Experiment(config, TINY_SIM, tmp_path, pool, world_factory=SimpleFlatWorld)
+
+
+def test_init_from_is_for_the_island_ea_only() -> None:
+    config = replace(EAConfig(), algorithm="random_search", init_from="saved.npy")
+    with pytest.raises(ValueError, match="init_from"):
+        check_config(config)
+
+
+def population_of(population: Population, island: int) -> list[list[float]]:
+    """The genotypes on one island, in population order."""
+    return [ind.genotype for ind in population if ind.tags["island"] == island]
+
+
+def test_an_interrupted_run_resumes_where_its_database_ends(
+    tmp_path: Path, pool: Pool
+) -> None:
+    """`resume` continues from the last saved generation: the log goes on
+    without a gap or a repeat, the best brain is kept, and the old database
+    is kept beside the new one."""
+    out = tmp_path / "run"
+    config = replace(tiny_config("best"), max_evaluations=30)  # generations 0-2
+    run_tiny(config, out, pool)
+    best_before = np.load(out / "best_genotype.npy")
+    (out / "summary.json").unlink()  # as if the power went out after generation 2
+
+    longer = replace(config, max_evaluations=48)  # resuming may extend the budget
+    Experiment(
+        longer, TINY_SIM, out, pool, world_factory=SimpleFlatWorld, resume=True
+    ).evolve()
+
+    with (out / "log.csv").open() as handle:
+        rows = [row for row in csv.DictReader(handle) if row["island"] == "all"]
+    assert [int(row["generation"]) for row in rows] == [0, 1, 2, 3, 4]
+    assert [int(row["evaluations"]) for row in rows] == [12, 21, 30, 39, 48]
+    best = [float(row["best_final"]) for row in rows]
+    assert all(later <= earlier for earlier, later in pairwise(best))
+    if best[-1] == best[2]:
+        np.testing.assert_array_equal(np.load(out / "best_genotype.npy"), best_before)
+    assert (out / "database_part1.db").exists() and (out / "database.db").exists()
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["generations"] == 4 and summary["evaluations"] == 48
+
+
+def test_resume_refuses_a_run_with_other_settings(tmp_path: Path, pool: Pool) -> None:
+    out = tmp_path / "run"
+    run_tiny(tiny_config("best"), out, pool)
+    (out / "summary.json").unlink()
+    with pytest.raises(ValueError, match="other settings"):
+        Experiment(
+            tiny_config("worst"),
+            TINY_SIM,
+            out,
+            pool,
+            world_factory=SimpleFlatWorld,
+            resume=True,
+        )
+
+
+def test_resume_without_a_database_starts_fresh(tmp_path: Path, pool: Pool) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    Experiment(
+        tiny_config("best"),
+        TINY_SIM,
+        out,
+        pool,
+        world_factory=SimpleFlatWorld,
+        resume=True,
+    ).evolve()
+    assert (out / "summary.json").exists()

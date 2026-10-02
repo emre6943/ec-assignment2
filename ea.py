@@ -40,6 +40,8 @@ from typing import Literal
 # Third-party libraries
 import numpy as np
 import numpy.typing as npt
+from sqlalchemy import func
+from sqlmodel import Session, create_engine, select
 
 # Local libraries (ARIEL)
 from ariel import console
@@ -61,6 +63,7 @@ from simulate import (
     parse_yaws,
     run_terrains,
     save_terrains,
+    saved_sim_config,
     terrain_yaw,
 )
 from simulate import fitness as compute_fitness
@@ -127,6 +130,11 @@ class EAConfig:
     mutation_rate: float = 1.0
     init_scale: float = 0.5
     clock_boost: float = 1.0  # clock-input weights x this in new random genotypes (D17)
+    # Start from saved networks (experiment X): an .npy file of genotypes, one
+    # per row (a single best_genotype.npy works too). They take the first
+    # slots of the initial population, dealt round-robin over the islands;
+    # random networks fill the rest. "" starts fully random, as every run did.
+    init_from: str = ""
 
     # Terrain (decision D10). "per_run": one set of terrains per seed, kept for
     # every generation and shared by every condition with that seed.
@@ -182,6 +190,8 @@ def check_config(config: "EAConfig") -> None:
         problems.append("final_duration_from must be 0 or more")
     if config.crossover not in CROSSOVERS:
         problems.append(f"crossover must be one of {', '.join(CROSSOVERS)}")
+    if config.init_from and config.algorithm == "random_search":
+        problems.append("init_from only applies to the island EA, not random search")
     try:
         yaws = parse_yaws(config.spawn_yaws)
     except ValueError:
@@ -252,6 +262,30 @@ def new_individual(
     return individual
 
 
+def saved_genotypes(path: str, length: int, room: int) -> list[Genotype]:
+    """The genotypes in `path` (`EAConfig.init_from`); none for an empty path.
+
+    `length` is this run's genotype length and `room` its population size;
+    a file that does not fit is rejected before anything runs.
+    """
+    if not path:
+        return []
+    genotypes = np.atleast_2d(np.load(path))
+    if genotypes.shape[1] != length:
+        msg = (
+            f"init_from: {path} holds genotypes of {genotypes.shape[1]} weights, "
+            f"but this run's network has {length}"
+        )
+        raise ValueError(msg)
+    if len(genotypes) > room:
+        msg = (
+            f"init_from: {path} holds {len(genotypes)} genotypes, more than "
+            f"the population of {room}"
+        )
+        raise ValueError(msg)
+    return list(genotypes)
+
+
 def island_members(population: Population, island: int) -> list[Individual]:
     """The living individuals on one island."""
     return [
@@ -272,13 +306,24 @@ class Experiment:
         pool: Pool,
         world_factory: Callable[[], BaseWorld] = RuggedTerrainWorld,
         terrain_dir: Path | None = None,
+        resume: bool = False,
     ) -> None:
         """`terrain_dir` holds this seed's terrains in "per_run" mode; pass the
         same directory to every condition with the same seed so they share
-        the ground. It defaults to a folder inside `out`."""
+        the ground. It defaults to a folder inside `out`.
+
+        With `resume`, an unfinished run in `out` (a database, no summary)
+        continues where its database ends (see `restore`); otherwise the run
+        starts from scratch.
+        """
         check_config(config)
         self.config = config
         self.sim = sim
+        self.init_genotypes = saved_genotypes(
+            config.init_from,
+            sim.genotype_length,
+            config.n_islands * config.island_size,
+        )
         self.out = out
         self.pool = pool
         self.world_factory = world_factory  # replaced only in tests
@@ -309,19 +354,23 @@ class Experiment:
         self.best_fitness = float("inf")
         self.started_at = time.time()
 
-        # Outputs of an earlier run in the same folder would otherwise survive
-        # and be read as this run's (e.g. by analyze.py).
-        for stale in (
-            "summary.json",
-            "unseen.json",
-            "best_genotype.npy",
-            "best_genotype_short.npy",
-        ):
-            (out / stale).unlink(missing_ok=True)
-
         self.log_path = out / "log.csv"
-        with self.log_path.open("w", newline="") as handle:
-            csv.writer(handle).writerow(LOG_COLUMNS)
+        self.resumed: Population | None = None
+        database = out / "database.db"
+        if resume and database.exists() and not (out / "summary.json").exists():
+            self.resumed = self.restore(database, world_factory.__name__)
+        else:
+            # Outputs of an earlier run in the same folder would otherwise
+            # survive and be read as this run's (e.g. by analyze.py).
+            for stale in (
+                "summary.json",
+                "unseen.json",
+                "best_genotype.npy",
+                "best_genotype_short.npy",
+            ):
+                (out / stale).unlink(missing_ok=True)
+            with self.log_path.open("w", newline="") as handle:
+                csv.writer(handle).writerow(LOG_COLUMNS)
         (out / "config.json").write_text(
             json.dumps(
                 {
@@ -334,17 +383,98 @@ class Experiment:
             )
         )
 
+    def restore(self, database: Path, world: str) -> Population:
+        """Pick up an unfinished run (a crash, a power cut) where its database ends.
+
+        ariel.ec commits every finished generation, so the database holds the
+        living population of the last one; the generation in progress when
+        the run stopped is lost and simply runs again. The settings must be
+        the run's own (only `max_evaluations` may grow). The log is cut back
+        to the last saved generation, the best network so far is kept, and
+        the old database is kept as `database_part<N>.db` while a new
+        `database.db` records the rest. The random streams cannot be
+        restored, so a resumed run is not identical to one that never stopped.
+        """
+        saved = json.loads((self.out / "config.json").read_text())
+        saved_ea = replace(
+            EAConfig(**saved["ea"]), max_evaluations=self.config.max_evaluations
+        )
+        if (
+            saved_ea != self.config
+            or saved_sim_config(saved["sim"]) != self.sim
+            or saved.get("world") != world
+        ):
+            msg = f"resume: {self.out} was run with other settings"
+            raise ValueError(msg)
+
+        engine = create_engine(f"sqlite:///{database}")
+        with Session(engine) as session:
+            generation = session.exec(select(func.max(Individual.time_of_death))).one()
+            rows = session.exec(select(Individual).where(Individual.alive)).all()
+            population = []
+            for row in rows:
+                if row.time_of_death != generation or row.requires_eval:
+                    msg = f"resume: {database} does not end on a finished generation"
+                    raise ValueError(msg)
+                tags = dict(row.tags)
+                individual = new_individual(
+                    row.genotype, int(tags.pop("island")), **tags
+                )
+                individual.fitness = row.fitness
+                population.append(individual)
+        engine.dispose()
+        part = 1
+        while (self.out / f"database_part{part}.db").exists():
+            part += 1
+        database.rename(self.out / f"database_part{part}.db")
+
+        with self.log_path.open() as handle:
+            logged = list(csv.DictReader(handle))
+        # The log may already hold the lost generation; its best network was
+        # saved, so it still counts towards the best so far.
+        self.best_fitness = min(
+            float(row["best_final"]) for row in logged if row["island"] == "all"
+        )
+        kept = [row for row in logged if int(row["generation"]) <= generation]
+        with self.log_path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, LOG_COLUMNS)
+            writer.writeheader()
+            writer.writerows(kept)
+        last = kept[-1]
+        if (self.out / "best_genotype.npy").exists():
+            self.best_genotype = np.load(self.out / "best_genotype.npy").tolist()
+
+        self.generation = generation
+        self.evaluations = int(last["evaluations"])
+        self.started_at = time.time() - float(last["seconds"])
+        self.rng = np.random.default_rng((self.config.seed, 1, generation))
+        console.print(
+            f"resuming {self.out} after generation {generation} "
+            f"({self.evaluations} evaluations, best {self.best_fitness:.3f})",
+            highlight=False,
+        )
+        return Population(population)
+
     # -- Operations -------------------------------------------------------- #
 
     def initial_population(self) -> Population:
-        """`island_size` random networks per island, weights from N(0, init_scale^2)."""
-        return Population(
-            [
-                new_individual(self.random_individual(), island)
-                for island in range(self.config.n_islands)
-                for _ in range(self.config.island_size)
-            ]
-        )
+        """`island_size` networks per island, weights from N(0, init_scale^2).
+
+        With `init_from`, saved network k takes slot k // n_islands of island
+        k % n_islands, so each island gets its share. Only the other slots
+        draw a random network, in the same order as a run without saved ones.
+        """
+        n_islands = self.config.n_islands
+        population = []
+        for island in range(n_islands):
+            for slot in range(self.config.island_size):
+                k = slot * n_islands + island
+                if k < len(self.init_genotypes):
+                    genotype = self.init_genotypes[k]
+                else:
+                    genotype = self.random_individual()
+                population.append(new_individual(genotype, island))
+        return Population(population)
 
     def random_individual(self) -> Genotype:
         """A random genotype: the initial population, and random search.
@@ -712,9 +842,13 @@ class Experiment:
     # -- Running ------------------------------------------------------------ #
 
     def evolve(self) -> None:
-        """Evaluate generation 0, then step until the evaluation budget is spent."""
-        population = self.evaluate(self.initial_population())
-        self.log(population)
+        """Evaluate generation 0 (or take the resumed population), then step
+        until the evaluation budget is spent."""
+        if self.resumed is None:
+            population = self.evaluate(self.initial_population())
+            self.log(population)
+        else:
+            population = self.resumed
 
         database = self.out / "database.db"
         ea = EA(
@@ -728,6 +862,7 @@ class Experiment:
             is_maximisation=False,
             db_file_path=database,
             quiet=True,
+            first_generation_id=self.generation,
         )
 
         while self.evaluations < self.config.max_evaluations:
