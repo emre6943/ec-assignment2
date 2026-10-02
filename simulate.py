@@ -36,7 +36,7 @@ individuals would no longer be compared fairly (D10).
 import csv
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
@@ -52,9 +52,15 @@ from ariel.simulation.tasks.targeted_locomotion import distance_to_target
 # Local libraries
 from bodies import DEFAULT_BODY, FIRST_BODY, body_info, build_body
 from genome import genotype_length, split
-from network import Genotype, NetworkShape, forward, parse_hidden
+from network import Genotype, NetworkShape, layers, parse_hidden, run_layers
 from sensors import CORE_BODY, HALF_PI, n_inputs, ray_set, read_inputs
-from terrain import CORE_ABOVE_LOWEST_POINT, ground_geoms, ground_height, spawn_height
+from terrain import (
+    CORE_ABOVE_LOWEST_POINT,
+    ground_geoms,
+    ground_height,
+    mesh_boxes,
+    spawn_height,
+)
 
 SPAWN_XY: tuple[float, float] = (0.0, 0.0)
 TEMPLATE_SPAWN_Z: float = 0.1  # the template's SPAWN_POS height
@@ -252,7 +258,8 @@ def carry_shortfall(core_height: float, carry_height: float = CARRY_HEIGHT) -> f
     core lies on the ground at CORE_ABOVE_LOWEST_POINT.
     """
     lift = core_height - CORE_ABOVE_LOWEST_POINT
-    return float(np.clip(1.0 - lift / carry_height, 0.0, 1.0))
+    # min/max, not np.clip: same value, and much faster on a single number.
+    return float(min(max(1.0 - lift / carry_height, 0.0), 1.0))
 
 
 def shortfall_of_least(per_leg: npt.NDArray[np.float64]) -> float:
@@ -303,12 +310,17 @@ def work_imbalance(
 
 
 def core_touches_ground(
-    data: mj.MjData, core_geom: int, ground: tuple[int, ...]
+    data: mj.MjData, core_geom: int, ground: Collection[int]
 ) -> bool:
-    """True if any current contact is between the core and a ground geom."""
-    pairs = data.contact.geom[: data.ncon]
-    return bool(
-        np.any((pairs == core_geom).any(axis=1) & np.isin(pairs, ground).any(axis=1))
+    """True if any current contact is between the core and a ground geom.
+
+    Plain Python over the few contact pairs: faster than numpy at this size.
+    The core is never part of the ground, so a pair is (core, ground) or
+    (ground, core).
+    """
+    return any(
+        (a == core_geom and b in ground) or (b == core_geom and a in ground)
+        for a, b in data.contact.geom[: data.ncon].tolist()
     )
 
 
@@ -340,14 +352,17 @@ def walk(
     """
     shape: NetworkShape = config.shape
     weights, clock_hz = split(genotype, shape, config.evolve_tempo)
+    network = layers(weights, shape)
     core_id = model.body(CORE_BODY).id
     core_geom = model.geom(CORE_BODY).id
     ground = ground_geoms(model)
+    ground_set = frozenset(ground)
     vision_ground = ground if config.vision else None
 
     data = mj.MjData(model)
     mj.mj_resetData(model, data)
     mj.mj_forward(model, data)
+    boxes = mesh_boxes(model, data, ground)
     start_xy = data.qpos[0:2].copy()
     start_distance = distance_to_target(start_xy, TARGET_XY)
 
@@ -383,11 +398,11 @@ def walk(
 
         updates += 1
         distance_sum += now_distance
-        touching += core_touches_ground(data, core_geom, ground)
+        touching += core_touches_ground(data, core_geom, ground_set)
         flipped += is_upside_down(data, core_id)
         x, y, z = data.xpos[core_id]
         shortfall += carry_shortfall(
-            z - ground_height(model, data, ground, x, y), config.carry_height
+            z - ground_height(model, data, ground, x, y, boxes), config.carry_height
         )
         angles.append(data.qpos[7:].copy())
         power = data.actuator_force * data.qvel[6 : 6 + model.nu]
@@ -402,7 +417,7 @@ def walk(
             config.vision_rays,
             config.position,
         )
-        data.ctrl[:] = forward(weights, shape, inputs) * HALF_PI
+        data.ctrl[:] = run_layers(network, inputs) * HALF_PI
         mj.mj_step2(model, data)
         mj.mj_step(model, data, nstep=config.control_every - 1)
 

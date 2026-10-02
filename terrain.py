@@ -34,6 +34,7 @@ CORE_ABOVE_LOWEST_POINT: float = 0.075
 REACH_MARGIN: float = 0.06  # beyond the outermost module centre
 SPAWN_CLEARANCE: float = 0.02  # gap between the robot and the highest ground under it
 RAY_START_Z: float = 100.0  # vertical rays for the ground height start this high
+DOWN = np.array([0.0, 0.0, -1.0])
 
 
 def ground_geoms(model: mj.MjModel) -> tuple[int, ...]:
@@ -128,12 +129,39 @@ def _heightfield_height(
     return float(centre[2]) + float(value) * size_z
 
 
+def mesh_boxes(
+    model: mj.MjModel, data: mj.MjData, ground: tuple[int, ...]
+) -> dict[int, tuple[float, float, float, float]]:
+    """The world (x min, x max, y min, y max) around every mesh ground piece.
+
+    A vertical ray outside a piece's box cannot hit it, so `ground_height`
+    can skip it there. The ground never moves, so a walk computes the boxes
+    once (after `mj_forward`) and reuses them at every step. Each box is the
+    piece's own bounding box turned into the world frame, padded by 1 µm.
+    """
+    boxes = {}
+    for geom in ground:
+        if model.geom_type[geom] != mj.mjtGeom.mjGEOM_MESH:
+            continue
+        rotation = data.geom_xmat[geom].reshape(3, 3)
+        centre = data.geom_xpos[geom] + rotation @ model.geom_aabb[geom, :3]
+        half = np.abs(rotation) @ model.geom_aabb[geom, 3:] + 1e-6
+        boxes[geom] = (
+            float(centre[0] - half[0]),
+            float(centre[0] + half[0]),
+            float(centre[1] - half[1]),
+            float(centre[1] + half[1]),
+        )
+    return boxes
+
+
 def ground_height(
     model: mj.MjModel,
     data: mj.MjData,
     ground: tuple[int, ...],
     x: float,
     y: float,
+    boxes: dict[int, tuple[float, float, float, float]] | None = None,
 ) -> float:
     """Height of the highest ground at world (x, y); -inf if there is none.
 
@@ -141,9 +169,9 @@ def ground_height(
     as unbounded, and any other ground piece is found with a vertical ray.
     Used for the spawn height and to tell when the vision rays start below
     the ground - never as a controller input, since a real robot would not
-    have a map of the ground.
+    have a map of the ground. With `boxes` (from `mesh_boxes`), mesh pieces
+    whose box does not contain (x, y) are skipped: same result, fewer rays.
     """
-    down = np.array([0.0, 0.0, -1.0])
     heights = []
     for geom in ground:
         kind = model.geom_type[geom]
@@ -152,8 +180,13 @@ def ground_height(
         elif kind == mj.mjtGeom.mjGEOM_PLANE:
             height = float(data.geom_xpos[geom, 2])
         else:
+            box = boxes.get(geom) if boxes is not None else None
+            if box is not None and not (
+                box[0] <= x <= box[1] and box[2] <= y <= box[3]
+            ):
+                continue
             origin = np.array([x, y, RAY_START_Z])
-            distance = ray_to_geom(model, data, geom, origin, down)
+            distance = ray_to_geom(model, data, geom, origin, DOWN)
             height = RAY_START_Z - distance if distance >= 0.0 else None
         if height is not None:
             heights.append(height)
