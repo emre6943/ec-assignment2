@@ -10,7 +10,9 @@ import pytest
 from analyze import (
     friedman,
     holm,
+    paired_comparisons,
     planned_comparisons,
+    rank_biserial,
     run_metrics,
     stats_report,
     summary_markdown,
@@ -92,6 +94,95 @@ def test_reports_are_written_as_markdown() -> None:
     assert "No condition named" in stats_report(table, "missing")
     summary = summary_markdown(table.assign(evals_to_threshold=np.nan), 1.6, 12000)
     assert "not reached (0/5)" in summary
+
+
+def make_seeds(effects: dict[str, float], seeds: int = 20) -> pd.DataFrame:
+    """`seeds` seeds per condition, each condition `effect` from the seed's base.
+
+    The base varies far more between seeds (some arenas are harder) than the
+    effects do, plus a little noise per run: only pairing by seed sees them.
+    """
+    rng = np.random.default_rng(0)
+    rows = []
+    for seed in range(seeds):
+        base = rng.uniform(1.0, 2.0)
+        for condition, effect in effects.items():
+            value = base + effect + rng.normal(0.0, 0.02)
+            rows.append(
+                {
+                    "condition": condition,
+                    "run": f"seed{seed}",
+                    "final_fitness": value,
+                    "auc": value,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_a_clearly_better_condition_is_significant_after_holm() -> None:
+    table = make_seeds({"best": -0.1, "none": 0.0, "worst": 0.0})
+    tests = {(t.a, t.b): t for t in paired_comparisons(table, "final_fitness")}
+    assert list(tests) == [("best", "none"), ("best", "worst"), ("none", "worst")]
+    best = tests[("best", "none")]
+    assert best.pairs == 20 and best.p_holm < 0.05
+    assert best.median_difference == pytest.approx(-0.1, abs=0.02)
+    assert best.rank_biserial == -1.0  # lower on every seed
+    assert tests[("none", "worst")].p_holm > 0.05  # noise only
+
+
+def test_identical_conditions_give_p_one() -> None:
+    table = make_seeds({"a": 0.0})
+    table = pd.concat([table, table.assign(condition="b")])
+    (test,) = paired_comparisons(table, "auc")
+    assert (test.p, test.p_holm) == (1.0, 1.0)
+    assert (test.median_difference, test.rank_biserial) == (0.0, 0.0)
+
+
+def test_pairing_is_by_seed_not_by_row_order() -> None:
+    table = make_seeds({"a": -0.1, "b": 0.0})
+    shuffled = table.sample(frac=1.0, random_state=1)
+    assert list(shuffled["run"]) != list(table["run"])
+    assert paired_comparisons(shuffled, "auc") == paired_comparisons(table, "auc")
+    assert paired_comparisons(shuffled, "auc")[0].rank_biserial == -1.0
+
+
+def test_holm_adjusted_p_values_are_monotone_and_at_most_one() -> None:
+    effects = {"best": -0.05, "random": -0.01, "none": 0.0, "standard": -0.08}
+    table = make_seeds({**effects, "random_search": 0.5})
+    worst = table[table["condition"] == "none"].assign(condition="worst")
+    table = pd.concat([table, worst])  # identical to none: p = 1, kept at 1
+    tests = sorted(paired_comparisons(table, "final_fitness"), key=lambda t: t.p)
+    assert len(tests) == 15  # every pair of six conditions, once
+    adjusted = [t.p_holm for t in tests]
+    assert adjusted == sorted(adjusted)
+    assert all(t.p <= t.p_holm <= 1.0 for t in tests)
+    assert adjusted[-1] == 1.0 and adjusted[0] < 0.05
+
+
+def test_incomplete_blocks_are_dropped() -> None:
+    table = make_seeds({"a": -0.1, "b": 0.0, "c": 0.0})
+    table = table[~((table["condition"] == "b") & (table["run"] == "seed3"))].copy()
+    missing = (table["condition"] == "c") & (table["run"] == "seed7")
+    table.loc[missing, "final_fitness"] = np.nan  # e.g. an unfinished test
+    assert {t.pairs for t in paired_comparisons(table, "final_fitness")} == {18}
+    assert {t.pairs for t in paired_comparisons(table, "auc")} == {19}
+    report = stats_report(table, "b")
+    assert "final_fitness: 18 seeds" in report and "seed3, seed7" in report
+
+
+def test_five_seeds_can_never_be_significant() -> None:
+    """Experiment 14: all 5 seeds on one side is the most extreme outcome."""
+    tests = paired_comparisons(make_table(effect=0.3), "final_fitness")
+    assert min(t.p for t in tests) == pytest.approx(0.0625)
+    assert all(t.p_holm >= 0.05 for t in tests)
+    report = stats_report(make_table(effect=0.3), "none")
+    assert "= 0.0625" in report and "no pair can be significant" in report
+
+
+def test_rank_biserial_splits_a_tie_between_both_sides() -> None:
+    assert rank_biserial(np.array([-1.0, -2.0, -3.0])) == -1.0
+    # ranks by size: 0 -> 1, 1 -> 2, -2 -> 3; (2 - 3 + 0) / (1 + 2 + 3)
+    assert rank_biserial(np.array([1.0, -2.0, 0.0])) == pytest.approx(-1 / 6)
 
 
 def test_unseen_skips_runs_it_cannot_read(tmp_path: Path) -> None:

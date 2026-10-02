@@ -318,8 +318,9 @@ live.
 - `summary.csv` / `summary.md`: per run and per condition, the best fitness at the
   budget, evaluations to reach a threshold, the area under the curve and (after
   `unseen.py`) the distance on unseen terrain;
-- `stats.md`: a Friedman test across all conditions (blocked by seed), and Mann-Whitney
-  U tests of each condition against `--reference` (default `none`), Holm-corrected
+- `stats.md`: a Friedman test across all conditions (blocked by seed), Mann-Whitney
+  U tests of each condition against `--reference` (default `none`), Holm-corrected,
+  and paired Wilcoxon tests of every pair of conditions, also in `paired_tests.csv`
   (decision D3 explains why). Pass `--out` to write somewhere else than `results/analysis/`.
 
 ## Rules we follow

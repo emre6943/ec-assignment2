@@ -249,7 +249,13 @@ statistics):** experiment 14's six conditions on 20 fresh seeds (10-29, new aren
 migrating every 20 generations (D11). With 20 paired seeds a paired Wilcoxon test can
 reach p ≈ 2 × 10⁻⁶, so every pair of conditions can be compared with a paired test and
 Holm's correction, instead of only five planned comparisons. Experiment 14 stays in the
-log as the first version on the final setup; the paper reports 99.
+log as the first version on the final setup; the paper reports 99. `analyze.py` now runs
+these tests next to the unchanged Friedman test and planned comparisons: for every pair, a
+two-sided Wilcoxon signed-rank test over the seeds complete in all six conditions,
+Holm-corrected across the 15 pairs of each metric (final fitness, AUC, unseen distance),
+with the median paired difference and the matched-pairs rank-biserial correlation (Kerby
+2014) as effect sizes; a seed where two conditions tie counts half for each side (Demšar
+2006). They go into `stats.md` and `paired_tests.csv`.
 
 **Only the emigrant selection changes between conditions.** Island count, island size,
 migration interval, number of migrants, topology and replacement policy stay fixed (D11).
@@ -1610,6 +1616,8 @@ on any seed, let alone all three.
   learning. *AAAI*, 34(04), 3283–3290.
 - Cantú-Paz, E. (2001). Migration policies, selection pressure, and parallel evolutionary
   algorithms. *Journal of Heuristics*, 7(4), 311–334.
+- Demšar, J. (2006). Statistical comparisons of classifiers over multiple data sets.
+  *Journal of Machine Learning Research*, 7, 1–30.
 - Eiben, A. E., & Smit, S. K. (2011). Parameter tuning for configuring and analyzing
   evolutionary algorithms. *Swarm and Evolutionary Computation*, 1(1), 19–31.
 - Eiben, A. E., & Smith, J. E. (2015). *Introduction to Evolutionary Computing* (2nd ed.).
@@ -1623,6 +1631,8 @@ on any seed, let alone all three.
 - Jakobi, N. (1997). Evolutionary robotics and the radical envelope-of-noise hypothesis.
   *Adaptive Behavior*, 6(2), 325–368.
 - Jones, T. (1995). Crossover, macromutation, and population-based search. *ICGA-95*, 73–80.
+- Kerby, D. S. (2014). The simple difference formula: an approach to teaching
+  nonparametric correlation. *Comprehensive Psychology*, 3, 11.IT.3.1.
 - Montana, D. J., & Davis, L. (1989). Training feedforward neural networks using genetic
   algorithms. *IJCAI-89*, 762–767.
 - Moriarty, D. E., & Miikkulainen, R. (1996). Efficient reinforcement learning through
