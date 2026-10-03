@@ -14,6 +14,8 @@ Each argument is a condition folder holding `seed*/` run folders. Writes into
     summary.md        per condition: mean ± std of those numbers
     stats.md          the statistical tests (see below)
     paired_tests.csv  the all-pairs tests of point 3, one row per pair and metric
+    normality_<metric>.png  normal Q-Q plots of every pair's differences, the
+                      check that picks the test of point 3
 
 How each number is defined (decision D3):
 
@@ -33,12 +35,17 @@ The statistics (decision D3), on the best fitness at the budget and on the AUC:
    Mann-Whitney p is 0.008, so only a few planned comparisons - not all
    pairs - can ever reach significance after correction.
 3. All pairs, paired by seed (for the final experiment's 20 seeds): every
-   pair of conditions with a two-sided Wilcoxon signed-rank test on the
-   per-seed differences, Holm-corrected across the pairs of each metric, with
-   the median difference and the matched-pairs rank-biserial correlation as
-   effect sizes. Also on the unseen-terrain distance when it is there. With
-   n seeds the smallest possible p is 2 / 2^n: 0.0625 for experiment 14's 5,
-   so nothing can be significant there.
+   pair of conditions with one two-sided test on the per-seed differences,
+   Holm-corrected across the pairs of each metric. Also on the unseen-terrain
+   distance when it is there. The test is chosen per metric by a rule fixed
+   before the final experiment's results existed (decision D25): a
+   Shapiro-Wilk test on each pair's differences, Holm-corrected across the
+   pairs. If no pair rejects normality, every pair gets the paired t-test,
+   with the mean difference, its 95% interval and Cohen's d_z as effect
+   sizes; otherwise every pair gets the Wilcoxon signed-rank test, with the
+   median difference and the matched-pairs rank-biserial correlation. With
+   n seeds the smallest possible Wilcoxon p is 2 / 2^n: 0.0625 for experiment
+   14's 5, so nothing can be significant there with that test.
 """
 
 # Standard library
@@ -56,7 +63,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from scipy.stats import friedmanchisquare, mannwhitneyu, rankdata, wilcoxon
+from scipy.stats import (
+    friedmanchisquare,
+    mannwhitneyu,
+    probplot,
+    rankdata,
+    shapiro,
+    ttest_1samp,
+    wilcoxon,
+)
 
 # The four migration policies in fixed categorical order (checked for
 # colour-blind separation); random search is the neutral baseline.
@@ -69,6 +84,7 @@ CONDITION_COLOURS = {
     "standard": "#e87ba4",
 }
 FALLBACK_COLOURS = ("#4a3aa7", "#008300", "#e34948")
+REJECTED = "#e34948"  # a pair whose differences fail the normality check
 TEXT = "#0b0b0b"
 MUTED = "#52514e"
 GRID = "#e4e3df"
@@ -82,23 +98,53 @@ ALPHA = 0.05
 DIFFERENCE_DECIMALS = 9
 EXACT_UP_TO = 50  # nonzero differences; 2^50 still counts exactly in a float
 INCOMPLETE_RUN_SHARE = 0.95  # a run that stopped below this share of its budget
+T_TEST = "paired t-test"
+WILCOXON = "Wilcoxon signed-rank"
+QQ_COLUMNS = 5  # panels per row of the normality figure: 15 pairs in 3 rows
 
 
 class PairedTest(NamedTuple):
     """One pair of conditions on one metric, paired by seed.
 
-    The differences are A - B and lower is better, so a negative median
-    difference or rank-biserial correlation means A did better.
+    The differences are A - B and lower is better, so a negative difference,
+    d_z or rank-biserial correlation means A did better. `test` is the test
+    D25's rule chose for this metric (the same for all its pairs), `p` its
+    p-value and `p_holm` that p Holm-corrected across the metric's pairs.
+    `p_other_test` is the other test's p, uncorrected, kept only to show
+    whether the choice mattered. Both tests' effect sizes are always filled in:
+    the mean difference, its 95% interval and d_z go with the t-test, the
+    median difference and r with the Wilcoxon test.
     """
 
     metric: str
     a: str
     b: str
     pairs: int
+    test: str
+    mean_difference: float
+    ci_low: float
+    ci_high: float
+    cohen_dz: float
     median_difference: float
     rank_biserial: float
     p: float
     p_holm: float
+    p_other_test: float
+
+
+class NormalityCheck(NamedTuple):
+    """Shapiro-Wilk on one pair's per-seed differences A - B.
+
+    `w`, `p` and `p_holm` are NaN for a pair that could not be checked, and
+    `unchecked` then says why; such a pair takes no part in the decision.
+    """
+
+    a: str
+    b: str
+    w: float
+    p: float
+    p_holm: float
+    unchecked: str = ""
 
 
 def best_so_far(run: Path) -> pd.DataFrame:
@@ -245,36 +291,141 @@ def signed_rank_p(differences: npt.NDArray) -> float:
     return float(counts[distance >= observed].sum() / counts.sum())
 
 
-def paired_comparisons(table: pd.DataFrame, metric: str) -> list[PairedTest]:
-    """Every pair of conditions on one metric: Wilcoxon signed-rank tests by seed.
+def paired_t(differences: npt.NDArray) -> tuple[float, float, float, float]:
+    """Two-sided paired t-test on the differences A - B: (p, CI low, CI high, d_z).
 
-    Each test is two-sided on the per-seed differences A - B over the complete
-    seeds only (`complete_blocks`), Holm-corrected across all the pairs of this
-    metric, with exact p-values (`signed_rank_p`). A seed on which A and B tie
-    exactly keeps its rank, split between the two signs (scipy's "zsplit"): a
-    tie is evidence of no difference, which the textbook rule of dropping it
-    would throw away. Demšar (2006) also keeps ties, though he drops one zero
-    when their number is odd. A condition with no values for this metric (say,
-    no unseen test yet) is left out rather than emptying the whole table. Empty
+    The test from the lecture: is the mean difference zero? scipy's ttest_rel
+    on A and B subtracts them and runs exactly this one-sample test on the
+    differences. The confidence interval is the 95% t interval of the mean
+    difference, and d_z (Cohen's d for paired data; Lakens 2013) is the mean
+    difference over the standard deviation of the differences: how many
+    seed-to-seed spreads apart the two conditions lie. If every seed has the
+    same difference, the spread is zero and the t statistic undefined; the
+    limits are used instead: p = 1 and d_z = 0 when that difference is 0
+    (identical conditions), p = 0 and an infinite d_z otherwise.
+    """
+    mean = float(differences.mean())
+    if np.ptp(differences) == 0:
+        if differences[0] == 0:
+            return 1.0, mean, mean, 0.0
+        return 0.0, mean, mean, float(np.copysign(np.inf, differences[0]))
+    result = ttest_1samp(differences, 0.0)
+    interval = result.confidence_interval(confidence_level=1 - ALPHA)
+    d_z = mean / float(differences.std(ddof=1))
+    return float(result.pvalue), float(interval.low), float(interval.high), d_z
+
+
+def pair_differences(
+    table: pd.DataFrame, metric: str
+) -> dict[tuple[str, str], npt.NDArray]:
+    """Every pair's per-seed differences A - B on one metric, by pair (A, B).
+
+    Over the complete seeds only (`complete_blocks`), in the order the
+    conditions were given, so the normality check, the tests and the figure all
+    see the same numbers. A condition with no values for this metric (say, no
+    unseen test yet) is left out rather than emptying the whole table. Empty
     when there are fewer than 2 conditions or 2 complete seeds.
     """
     if metric not in table:
-        return []
+        return {}
     blocks = complete_blocks(table.dropna(subset=[metric]), metric)
     if blocks.shape[1] < 2 or blocks.shape[0] < 2:
+        return {}
+    return {
+        (a, b): np.round((blocks[a] - blocks[b]).to_numpy(), DIFFERENCE_DECIMALS)
+        for a, b in combinations(blocks.columns, 2)
+    }
+
+
+def normality_checks(
+    differences: dict[tuple[str, str], npt.NDArray],
+) -> list[NormalityCheck]:
+    """Shapiro-Wilk on every pair's differences, Holm-corrected across the pairs.
+
+    The paired t-test assumes that the differences A - B, not the conditions'
+    own values, are bell-shaped, so that is what is checked. Shapiro-Wilk
+    (Shapiro & Wilk 1965) is the usual normality test for samples this small.
+    Holm keeps the chance that any check rejects a truly bell-shaped pair by
+    accident at 5% at most, so only clear evidence switches the metric to the
+    Wilcoxon test. Two kinds of pair cannot be checked and are left out of the
+    correction and the decision: one with the same difference on every seed
+    (it has no shape; the differences are rounded, so float noise does not
+    count as spread, and scipy would return W = 1, p = 1 with a warning), and
+    any pair when there are fewer than 3 seeds, the least Shapiro-Wilk needs.
+    """
+    reasons = {}
+    for pair, d in differences.items():
+        if len(d) < 3:
+            reasons[pair] = "needs ≥ 3 seeds"
+        elif np.ptp(d) == 0:
+            reasons[pair] = "the same difference on every seed"
+    checked = [pair for pair in differences if pair not in reasons]
+    results = {pair: shapiro(differences[pair]) for pair in checked}
+    p_values = [float(results[pair].pvalue) for pair in checked]
+    adjusted = dict(zip(checked, holm(p_values), strict=True))
+    checks = []
+    for a, b in differences:
+        if (a, b) in reasons:
+            checks.append(NormalityCheck(a, b, np.nan, np.nan, np.nan, reasons[a, b]))
+        else:
+            w, p = (float(value) for value in results[a, b])
+            checks.append(NormalityCheck(a, b, w, p, adjusted[a, b]))
+    return checks
+
+
+def bell_shaped(checks: list[NormalityCheck]) -> bool:
+    """D25's rule: no checked pair rejects normality after Holm at `ALPHA`.
+
+    It decides for the whole metric at once, never pair by pair, so the test
+    cannot be picked to suit a pair. With no pair checked there is no sign of a
+    bell shape, and the Wilcoxon test, which needs none, is kept.
+    """
+    checked = [check for check in checks if not check.unchecked]
+    return bool(checked) and all(check.p_holm >= ALPHA for check in checked)
+
+
+def paired_comparisons(table: pd.DataFrame, metric: str) -> list[PairedTest]:
+    """Every pair of conditions on one metric, paired by seed, with D25's test.
+
+    Each test is two-sided on the per-seed differences A - B
+    (`pair_differences`). One test serves every pair of the metric: the paired
+    t-test (`paired_t`) when the differences are bell-shaped (`bell_shaped`),
+    otherwise the Wilcoxon signed-rank test with exact p-values
+    (`signed_rank_p`). The chosen test's p-values are Holm-corrected across all
+    the pairs of this metric. In the Wilcoxon test a seed on which A and B tie
+    exactly keeps its rank, split between the two signs (scipy's "zsplit"): a
+    tie is evidence of no difference, which the textbook rule of dropping it
+    would throw away. Demšar (2006) also keeps ties, though he drops one zero
+    when their number is odd. Empty when there are fewer than 2 conditions or 2
+    complete seeds.
+    """
+    differences = pair_differences(table, metric)
+    if not differences:
         return []
-    pairs = list(combinations(blocks.columns, 2))
-    differences = [
-        np.round((blocks[a] - blocks[b]).to_numpy(), DIFFERENCE_DECIMALS)
-        for a, b in pairs
-    ]
-    p_values = [signed_rank_p(d) for d in differences]
+    use_t = bell_shaped(normality_checks(differences))
+    t_results = [paired_t(d) for d in differences.values()]
+    t_p = [p for p, *_ in t_results]
+    wilcoxon_p = [signed_rank_p(d) for d in differences.values()]
+    chosen, other = (t_p, wilcoxon_p) if use_t else (wilcoxon_p, t_p)
     return [
         PairedTest(
-            metric, a, b, len(blocks), float(np.median(d)), rank_biserial(d), p, p_holm
+            metric,
+            a,
+            b,
+            len(d),
+            T_TEST if use_t else WILCOXON,
+            float(d.mean()),
+            low,
+            high,
+            d_z,
+            float(np.median(d)),
+            rank_biserial(d),
+            p,
+            p_holm,
+            p_other,
         )
-        for (a, b), d, p, p_holm in zip(
-            pairs, differences, p_values, holm(p_values), strict=True
+        for ((a, b), d), (_, low, high, d_z), p, p_holm, p_other in zip(
+            differences.items(), t_results, chosen, holm(chosen), other, strict=True
         )
     ]
 
@@ -284,23 +435,115 @@ def format_p(p: float) -> str:
     return f"{p:.4f}" if p >= 1e-4 else f"{p:.1e}"
 
 
+def bold_below_alpha(p: float) -> str:
+    """A Holm-adjusted p for a table, in bold when it is below `ALPHA`."""
+    return f"**{format_p(p)}**" if p < ALPHA else format_p(p)
+
+
+def normality_report(checks: list[NormalityCheck]) -> list[str]:
+    """One metric's normality checks and the decision they give, as Markdown."""
+    lines = [
+        "Normality of the differences: Shapiro-Wilk per pair, Holm-corrected across",
+        "the pairs checked (bold: rejected, the differences are not bell-shaped).",
+        "",
+        "| A vs B | Shapiro W | p | p (Holm) |",
+        "|---|---|---|---|",
+    ]
+    for check in checks:
+        if check.unchecked:
+            lines.append(f"| {check.a} vs {check.b} | – | – | {check.unchecked} |")
+        else:
+            lines.append(
+                f"| {check.a} vs {check.b} | {check.w:.3f} | {format_p(check.p)} | "
+                f"{bold_below_alpha(check.p_holm)} |"
+            )
+    checked = [check for check in checks if not check.unchecked]
+    rejected = [f"{c.a} vs {c.b}" for c in checked if c.p_holm < ALPHA]
+    if not checked:
+        decision = (
+            "no pair could be checked, so every pair gets the Wilcoxon signed-rank "
+            "test, which needs no bell shape."
+        )
+    elif rejected:
+        decision = (
+            f"normality is rejected for {', '.join(rejected)}, so every pair gets "
+            "the Wilcoxon signed-rank test."
+        )
+    else:
+        decision = (
+            f"no pair rejects normality ({len(checked)} of {len(checks)} checked), "
+            "so every pair gets the paired t-test."
+        )
+    lines += ["", f"**Decision:** {decision}"]
+    if checked and len(checked) < len(checks):
+        lines.append("Pairs that could not be checked take no part in the decision.")
+    return lines
+
+
+def t_test_report(tests: list[PairedTest]) -> list[str]:
+    """One metric's paired t-tests as a Markdown table."""
+    lines = [
+        "Paired t-tests: the mean difference with its 95% confidence interval, and",
+        "d_z, the mean difference over the standard deviation of the differences.",
+        "",
+        "| A vs B | mean A − B | 95% CI | d_z | p | p (Holm) |",
+        "|---|---|---|---|---|---|",
+    ]
+    for test in tests:
+        lines.append(
+            f"| {test.a} vs {test.b} | {test.mean_difference:+.3f} | "
+            f"[{test.ci_low:+.3f}, {test.ci_high:+.3f}] | {test.cohen_dz:+.2f} | "
+            f"{format_p(test.p)} | {bold_below_alpha(test.p_holm)} |"
+        )
+    return lines
+
+
+def wilcoxon_report(tests: list[PairedTest], seeds: int) -> list[str]:
+    """One metric's Wilcoxon signed-rank tests as a Markdown table."""
+    # With n seeds the most extreme outcome, every seed on one side and no
+    # ties, has p = 2 / 2^n; Holm multiplies the smallest p by the pair count.
+    smallest = 2.0 / 2**seeds
+    after_holm = min(1.0, len(tests) * smallest)
+    verdict = ", so no pair can be significant here" if after_holm >= ALPHA else ""
+    lines = [
+        "Wilcoxon signed-rank tests with exact p-values; a seed on which A and B tie",
+        "counts half for each side. r is the matched-pairs rank-biserial correlation",
+        "(−1: A better on every seed).",
+        f"With {seeds} seeds the smallest possible p is 2 / 2^{seeds} "
+        f"= {format_p(smallest)}, {format_p(after_holm)} after Holm over "
+        f"{len(tests)} pairs{verdict}.",
+        "",
+        "| A vs B | median A − B | r | p | p (Holm) |",
+        "|---|---|---|---|---|",
+    ]
+    for test in tests:
+        lines.append(
+            f"| {test.a} vs {test.b} | {test.median_difference:+.3f} | "
+            f"{test.rank_biserial:+.2f} | {format_p(test.p)} | "
+            f"{bold_below_alpha(test.p_holm)} |"
+        )
+    return lines
+
+
 def paired_report(table: pd.DataFrame) -> list[str]:
-    """The all-pairs Wilcoxon tests as Markdown lines, one table per metric."""
+    """The all-pairs tests as Markdown lines, per metric: normality, decision, test."""
     lines = [
         "## All pairs, paired by seed",
         "",
-        "Two-sided Wilcoxon signed-rank tests on the per-seed differences A − B, with",
-        "exact p-values, Holm-corrected across the pairs of each metric. A seed missing",
-        "from any condition is dropped from all, so every pair compares the same seeds;",
-        "a seed on which A and B tie counts half for each side. Lower is better: a",
-        "negative median difference or r means A did better. r is the matched-pairs",
-        "rank-biserial correlation (−1: A better on every seed). **Bold**: below",
-        f"{ALPHA} after Holm.",
+        "Every pair of conditions is compared on the per-seed differences A − B with",
+        "a two-sided test, Holm-corrected across the pairs of each metric. The test",
+        "follows a rule fixed before the final experiment's results existed (D25):",
+        "if no pair's differences reject normality (Shapiro-Wilk, Holm-corrected,",
+        f"α = {ALPHA}), every pair of the metric gets the paired t-test; otherwise",
+        "every pair gets the Wilcoxon signed-rank test. A seed missing from any",
+        "condition is dropped from all, so every pair compares the same seeds. Lower",
+        "is better: a negative difference or effect size means A did better.",
+        f"**Bold**: below {ALPHA} after Holm.",
     ]
     for metric in PAIRED_METRICS:
         if metric not in table or table[metric].isna().all():
             continue
-        tests = paired_comparisons(table, metric)
+        differences = pair_differences(table, metric)
         blocks = complete_blocks(table.dropna(subset=[metric]), metric)
         lines += ["", f"### {metric}: {len(blocks)} seeds in every condition", ""]
         left_out = [c for c in dict.fromkeys(table["condition"]) if c not in blocks]
@@ -315,30 +558,15 @@ def paired_report(table: pd.DataFrame) -> list[str]:
                 f"Dropped, missing from some condition: {', '.join(dropped)}.",
                 "",
             ]
-        if not tests:
+        if not differences:
             lines.append("Needs ≥ 2 conditions and ≥ 2 seeds present in every one.")
             continue
-        # With n seeds the most extreme outcome, every seed on one side and no
-        # ties, has p = 2 / 2^n; Holm multiplies the smallest p by the pair count.
-        smallest = 2.0 / 2 ** len(blocks)
-        after_holm = min(1.0, len(tests) * smallest)
-        verdict = ", so no pair can be significant here" if after_holm >= ALPHA else ""
-        lines += [
-            f"With {len(blocks)} seeds the smallest possible p is 2 / 2^{len(blocks)} "
-            f"= {format_p(smallest)}, {format_p(after_holm)} after Holm over "
-            f"{len(tests)} pairs{verdict}.",
-            "",
-            "| A vs B | median A − B | r | p | p (Holm) |",
-            "|---|---|---|---|---|",
-        ]
-        for test in tests:
-            p_holm = format_p(test.p_holm)
-            if test.p_holm < ALPHA:
-                p_holm = f"**{p_holm}**"
-            lines.append(
-                f"| {test.a} vs {test.b} | {test.median_difference:+.3f} | "
-                f"{test.rank_biserial:+.2f} | {format_p(test.p)} | {p_holm} |"
-            )
+        tests = paired_comparisons(table, metric)
+        lines += [*normality_report(normality_checks(differences)), ""]
+        if tests[0].test == T_TEST:
+            lines += t_test_report(tests)
+        else:
+            lines += wilcoxon_report(tests, len(blocks))
     return lines
 
 
@@ -476,6 +704,80 @@ def draw_convergence(
     return True
 
 
+def draw_normality(
+    differences: dict[tuple[str, str], npt.NDArray],
+    checks: list[NormalityCheck],
+    metric: str,
+    path: Path,
+) -> None:
+    """Normal Q-Q plots of every pair's differences A - B, one small panel each.
+
+    Each panel puts the sorted differences against the quantiles a normal
+    distribution would give at the same ranks. The dashed line is where they
+    would lie if the differences were exactly normal with their own mean and
+    standard deviation, so a bell shape shows as points along the line, a skew
+    as a curve and an outlying seed as a lone point far off it. It is the
+    picture behind the Shapiro-Wilk numbers that pick the test (D25), so a
+    reader can see what a rejection rests on. Pairs whose check rejected
+    normality after Holm are drawn in red and say so in words.
+    """
+    columns = min(QQ_COLUMNS, len(differences))
+    rows = -(-len(differences) // columns)  # ceiling division
+    figure, axes = plt.subplots(
+        rows, columns, figsize=(2.7 * columns, 2.3 * rows + 0.9), squeeze=False
+    )
+    figure.patch.set_facecolor(SURFACE)
+    for axis, ((a, b), d), check in zip(
+        axes.flat, differences.items(), checks, strict=False
+    ):
+        quantiles, ordered = probplot(d, fit=False)
+        rejected = not check.unchecked and check.p_holm < ALPHA
+        colour = REJECTED if rejected else TEXT
+        axis.plot(
+            quantiles,
+            d.mean() + d.std(ddof=1) * quantiles,
+            color=MUTED,
+            linewidth=1,
+            linestyle="--",
+        )
+        axis.scatter(quantiles, ordered, s=12, color=colour, zorder=3)
+        style_axis(axis)
+        axis.tick_params(labelsize=7)
+        axis.set_title(f"{a} vs {b}", color=TEXT, fontsize=9)
+        if check.unchecked:
+            note = f"not checked:\n{check.unchecked}"
+        else:
+            note = f"W = {check.w:.3f}\np (Holm) = {format_p(check.p_holm)}"
+            if rejected:
+                note += "\nnot bell-shaped"
+        axis.text(
+            0.04,
+            0.96,
+            note,
+            transform=axis.transAxes,
+            va="top",
+            fontsize=7,
+            color=colour,
+        )
+    for axis in axes.flat[len(differences) :]:
+        axis.set_visible(False)
+    figure.supxlabel("normal quantiles", color=TEXT, fontsize=10)
+    figure.supylabel(
+        "difference A − B, sorted (lower: A better)", color=TEXT, fontsize=10
+    )
+    figure.suptitle(
+        f"{metric}: normal Q-Q plots of the per-seed differences "
+        f"({len(next(iter(differences.values())))} seeds)",
+        color=TEXT,
+        fontsize=12,
+        x=0.02,
+        ha="left",
+    )
+    figure.tight_layout()
+    figure.savefig(path, dpi=150, facecolor=SURFACE)
+    plt.close(figure)
+
+
 def main() -> None:
     """Aggregate every condition and write the figure, tables and tests."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -523,6 +825,15 @@ def main() -> None:
     pd.DataFrame(paired, columns=PairedTest._fields).to_csv(
         args.out / "paired_tests.csv", index=False
     )
+    for metric in PAIRED_METRICS:
+        differences = pair_differences(table, metric)
+        if differences:
+            draw_normality(
+                differences,
+                normality_checks(differences),
+                metric,
+                args.out / f"normality_{metric}.png",
+            )
 
     drawn = draw_convergence(curves, grid, args.threshold, args.out / "convergence.png")
     print(summary)
