@@ -7,22 +7,24 @@ Assignment 1 evolved a body. This one takes a fixed body and evolves the weights
 neural-network controller, so that it walks towards a target. Our research question
 compares **island-model migration policies**.
 
-**Status (2026-10-02): experiments 1-29 are done, and the paper draft is in
-[`report/`](report/).** The final setup is `spider_8` on `OlympicArena` (the code's
-defaults). The research question was first answered by `experiments/14_main_olympic.sh`;
-its follow-ups are 26 (how often to migrate), 27 (statistics), 28 (longer test walks) and
-29 (the absolute position as two extra inputs: no gain, not adopted). **The final
-experiment is `experiments/99_final_experiment.sh`** (prepared, not run yet): 14 again
-with migration every 20 generations and 20 fresh seeds, for firmer statistics. The paper
-will report 99; the paragraph below summarises 14 until then.
+**Status (2026-10-03): every experiment is done, including the final one, and the paper
+draft in [`report/`](report/) reports it.** The final setup is `spider_8` on
+`OlympicArena` (the code's defaults). **The final experiment is
+`experiments/99_final_experiment.sh`**: the six conditions on 20 fresh seeds (10-29),
+migrating every 20 generations, results in `results/final/`. It replaced the first
+version, `experiments/14_main_olympic.sh` (5 seeds, every 10 generations), whose
+follow-ups are 26 (how often to migrate, which chose 20), 27 (statistics), 28 (longer test
+walks) and 29 (the absolute position as two extra inputs: no gain, not adopted).
 
-**The answer in one paragraph:** migrating (any policy) makes the islands converge faster
-than no migration (89-96% probability), and migrating the best is the fastest. But after
-12,000 evaluations the policies end at about the same fitness and do equally well on
-unseen arenas, and one standard population (no islands) ended best, although that lead
-did not survive adding two inputs to the brain (experiment 29). How *often* the
-islands migrate matters more than *whom* they send: every 20 generations was best. Only 3
-of 30 best brains reach the target in the 15 s they trained for; 11 do given 20 s.
+**The answer in one paragraph:** every EA beats random search by far (final fitness
+1.13-1.24 against 2.49). Between the policies the differences are small, and with 20 seeds
+none is significant after correcting for the 15 pairwise comparisons: migrating the best or
+random individuals probably converges faster than isolated islands (99% and 98% on the
+AUC), migrating the worst barely does (76%), and the final fitness and the unseen-arena
+results hardly depend on the policy. One standard population does as well as the islands
+(its lead in experiment 14 did not hold). How *often* the islands migrate mattered more
+than *whom* they send in the preliminary study (experiment 26). Only 19 of 120 best brains
+reach the target in the 15 s they trained for; 39 do given 20 s.
 
 **New here? Read in this order:**
 
@@ -98,8 +100,8 @@ experiment 14's exact setup; change `--policy` to `worst`, `random` or `none`, o
         --crossover-probability 0.9 --ariel-spawn --max-evaluations 12000 \
         --policy best --out results/olympic/best
 
-**Run the whole final experiment and its follow-ups** (one after another; about 4 + 2.5
-+ 3.5 hours of evolution on a 10-core Mac, plus the tests). Each script skips runs that are
+**Run the first version (experiment 14) and its follow-ups** (one after another; about
+4 + 2.5 + 3.5 hours of evolution on a 10-core Mac, plus the tests). Each script skips runs that are
 already finished, so an interrupted one can simply be started again:
 
     bash experiments/14_main_olympic.sh          # the research question: 6 conditions x 5 seeds
@@ -109,8 +111,9 @@ already finished, so an interrupted one can simply be started again:
     bash experiments/28_longer_walks.sh          # 15 / 20 / 30 / 60 s test walks
     bash experiments/29_absolute_position.sh     # 14 again, brains also told their (x, y)
 
-**The final experiment** (about 18 hours; its header has the command that runs it on
-emre-server as a service). A run that was cut off (crash, power cut) continues from its
+**The final experiment** (120 runs, about 15 machine-hours: 8 hours split by seed
+between emre-server and the Mac; its header has the command that runs it on emre-server
+as a service). A run that was cut off (crash, power cut) continues from its
 last saved generation when the script is started again (`run.py --resume`):
 
     bash experiments/99_final_experiment.sh      # 6 conditions x 20 seeds (10-29)
@@ -122,7 +125,7 @@ still reads every seed in `results/final/`.
 **Watch a brain walk.** `replay.py` saves an `.mp4` in the run's folder and prints how far
 from the target the robot ended:
 
-    uv run --project ../ariel python replay.py results/olympic/standard/seed4               # the best brain of all
+    uv run --project ../ariel python replay.py results/olympic/standard/seed4               # the best brain of experiment 14
     uv run --project ../ariel python replay.py results/olympic/standard/seed4 --duration 30 # walk longer
     uv run --project ../ariel python replay.py results/olympic/standard/seed4 --new-terrain # an arena it never saw
     uv run --project ../ariel python replay.py results/olympic/standard/seed4 --viewer      # live 3D window
@@ -134,8 +137,16 @@ The best run of each condition (lowest final fitness) is `standard/seed4`, `best
 **Make the figures and tables:**
 
     uv run --project ../ariel python paper_figures.py     # the paper's figures -> report/figures/
+    uv run --project ../ariel python paper_figures.py --final results/olympic \
+        --out results/olympic/figures                     # the same figures from experiment 14
     uv run --project ../ariel python rq_figure.py         # one-page answer -> results/olympic/rq_figure.png
     uv run --project ../ariel python rq_figure.py --metric distance
+
+`paper_figures.py` draws the final experiment from `results/final/` (`--final`): the
+convergence curves, every seed's final fitness and unseen distance (`final_spread`), the
+probabilities, the fitness terms and the longer walks. Only the interval figure comes
+from experiment 26 in `results/olympic/` (`--olympic`). A figure whose runs, or whose
+`unseen.py` / `longer_walks.py` results, are not there yet is skipped with a message.
 
 More analysis commands are under "Looking at results" below.
 
@@ -152,10 +163,10 @@ still has to be filled in.
 
 **Using someone else's results.** `results/` is not in git, and each seed's arena is
 random per machine, so you cannot regenerate the exact same results elsewhere. To work
-with the team's numbers, copy the whole `results/olympic/` folder from whoever ran it
-(Emre) into your `results/`, terrains included. Without the `database.db` files it is
-about 50 MB, and everything still works except the fitness-terms figure of
-`paper_figures.py`.
+with the team's numbers, copy the whole `results/olympic/` and `results/final/` folders
+from whoever ran them (Emre) into your `results/`, terrains included. Without the
+`database.db` files `results/olympic/` is about 50 MB, and everything still works,
+`paper_figures.py` included.
 
 ## What the code does
 
@@ -240,9 +251,10 @@ comparison between policies fair.
 | `unseen.py` | Test each run's best network on 20 terrains it never saw (robustness) |
 | `analyze.py` | **The report's numbers:** mean ± std curves per condition, summary table, statistical tests |
 | `probabilities.py` | How sure we are: for every pair of conditions, the probability that one is better (Bayesian paired t-test), A12 and seeds won |
+| `end_results.py` | Exploratory (D26): which EA ends best if compute is no concern, reaching the target first; arrivals, unseen reach and fitness, falls, per-seed ranks, into `results/final/end_results.md` |
 | `rq_figure.py` | The research question's answer in one four-panel figure (experiment 14) |
 | `longer_walks.py` | Walk the best brains for longer than they trained (15/20/30/60 s; step 28) |
-| `paper_figures.py` | The paper's figures, as PDFs, into `report/figures/` |
+| `paper_figures.py` | The paper's figures (experiment 99, and 26 for the migration interval), as PDFs, into `report/figures/` |
 | `compute_ledger.py` | Counts the compute every experiment used and writes `docs/compute.md` |
 | `report/` | The paper: `main.tex`, `references.bib`, the course's ACM template, `figures/` and the built `main.pdf` |
 | `experiments/` | One script per experiment we ran, plus the log of what each one showed |
@@ -272,13 +284,14 @@ live.
   - `database.db`: ARIEL's record of every individual;
   - `best_genotype.npy`: the best network, saved whenever it improves;
   - `summary.json`.
-- **Cost:** a run of the final setup (12,000 evaluations) takes 8-10 minutes on a 10-core
-  Mac. `run.py` uses 10 worker processes; on a smaller machine pass `--workers 4` (or
+- **Cost:** a run of the final setup (12,000 evaluations) takes about 7 minutes on the
+  M3 Pro Mac and 8.5 on emre-server (8-10 before the walk speed-up of 2026-10-02). `run.py` uses 10 worker processes; on a smaller machine pass `--workers 4` (or
   your core count). Run experiments **one after another**: two at once just makes each
   slower.
-- **The full experiment** for the report is `experiments/14_main_olympic.sh`: 6
-  conditions (4 migration policies, the standard EA, random search) × 5 seeds, about 4
-  hours, written to `results/olympic/`. It passes `--skip-done`, which skips any run
+- **The final experiment** for the report is `experiments/99_final_experiment.sh`: 6
+  conditions (4 migration policies, the standard EA, random search) × 20 seeds, written
+  to `results/final/` (its first version, `14_main_olympic.sh`, used 5 seeds and
+  `results/olympic/`). It passes `--skip-done`, which skips any run
   already finished with exactly the same settings, so an interrupted run can be resumed.
   (`08_main_experiment.sh` is the same experiment on the first setup, spider_16 on rugged.)
 - **Useful flags:**
@@ -323,8 +336,11 @@ live.
   `unseen.py`) the distance on unseen terrain;
 - `stats.md`: a Friedman test across all conditions (blocked by seed), Mann-Whitney
   U tests of each condition against `--reference` (default `none`), Holm-corrected,
-  and paired Wilcoxon tests of every pair of conditions, also in `paired_tests.csv`
-  (decision D3 explains why). Pass `--out` to write somewhere else than `results/analysis/`.
+  and paired tests of every pair of conditions, also in `paired_tests.csv`: per metric,
+  the paired t-test if no pair's differences reject normality (Shapiro-Wilk, Holm),
+  otherwise the Wilcoxon signed-rank test (decisions D3 and D25 explain why);
+- `normality_<metric>.png`: Q-Q plots of every pair's differences, the picture behind
+  that normality check. Pass `--out` to write somewhere else than `results/analysis/`.
 
 ## Rules we follow
 

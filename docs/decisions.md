@@ -20,7 +20,7 @@ Status legend:
 | D2 | World | ✅ | `OlympicArena` since 2026-09-29, ARIEL defaults (was `RuggedTerrainWorld`: too steep to walk on; D17) |
 | D2a | Spawn height | ✅ | Experiment 14 uses ARIEL's own spawn, as in the template (`--ariel-spawn`); earlier runs spawned 2 cm above the real ground, which rests in the same pose on OlympicArena |
 | D2b | Terrain bump height | ✅ | ARIEL's default; nothing in ARIEL changed or re-implemented |
-| D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed; to be answered by the final experiment (99, not run yet): 6 conditions × 20 fresh seeds |
+| D3 | Research question | ✅ (wording 🟡) | Effect of the emigrant-selection policy on convergence speed; answered by the final experiment (99, 2026-10-03): 6 conditions × 20 fresh seeds; every EA beats random search, the policies differ little and not significantly |
 | D4 | Controller outputs | 🟡 | One output per hinge (8 for spider_8; 16 for spider_16), direct position control |
 | D5 | Controller inputs | ✅ | 16 for spider_8: 8 joint angles + clock (2) + target vector (3) + tilt (3); no vision since experiment 23 (the rays sensed almost nothing); absolute (x, y) tested in experiment 29 and not added (no gain in training, slightly slower and worse on unseen arenas) |
 | D6 | Network shape | ✅ (experiment 24) | Fixed MLP 16-8-4-8 (two hidden layers, a bottleneck of 4); evolve weights only (212 weights) |
@@ -42,6 +42,8 @@ Status legend:
 | D22 | Parameter tuning | ✅ (experiments 19, 19b) | Crossover probability 0.9; σ, population, tournament, elites and dense mutation kept |
 | D23 | Train on several situations | ❌ (experiment 21) | 3 arenas, turned starts and 20 s walks tried; nothing reached unseen targets, nothing adopted |
 | D24 | Resuming a cut-off run | ✅ (2026-10-02) | `run.py --resume` continues from the last generation saved in both the database and the log; ARIEL's own restart is not used (it revives the dead parents) |
+| D25 | Statistical test for the final experiment | ✅ (2026-10-02, before any result of 99) | Per metric, one test for all 15 pairs: the paired t-test if no pair's differences reject normality (Shapiro-Wilk, Holm, α = 0.05), otherwise the Wilcoxon signed-rank test; Holm across the pairs |
+| D26 | End-result analysis | ✅ exploratory (2026-10-03) | Which EA ends best if compute is no concern: reaching the target first (own arena in 15/30 s, unseen arenas in 30 s), then unseen fitness; Cochran's Q / McNemar for yes/no, D25's rule otherwise; `end_results.py` |
 
 ---
 
@@ -202,7 +204,8 @@ changed the fitness instead (D15).
 > evolving a neural-network controller for `spider_8` on OlympicArena?
 
 (The first version, experiment 8, used `spider_16` on rugged terrain; D1, D2 and D17
-explain the switch. The final experiment is experiment 14.)
+explain the switch. Experiment 14 answered it first on the final setup, with 5 seeds;
+the final experiment is experiment 99, with 20 seeds and migration every 20 generations.)
 
 **Hypothesis (team):** migrating the best individuals converges fastest.
 
@@ -257,7 +260,9 @@ exact p-values even when seeds tie, Holm-corrected across the 15 pairs of each m
 (final fitness, AUC, unseen distance), with the median paired difference and the
 matched-pairs rank-biserial correlation (Kerby 2014) as effect sizes; a seed where two
 conditions tie counts half for each side (close to Demšar 2006, who drops one such seed
-when their number is odd). They go into `stats.md` and `paired_tests.csv`.
+when their number is odd). They go into `stats.md` and `paired_tests.csv`. Whether a
+metric's pairs get this Wilcoxon test or the paired t-test is decided per metric by a
+normality rule fixed before any result of experiment 99 existed (D25).
 
 **Only the emigrant selection changes between conditions.** Island count, island size,
 migration interval, number of migrants, topology and replacement policy stay fixed (D11).
@@ -1641,6 +1646,121 @@ refuse to resume; none of them is used in experiment 14 or 99. Only unfinished r
 resume: a finished run (it has a `summary.json`) started again with a larger budget starts
 over.
 
+## D25. Statistical test for the final experiment — ✅ paired t-test if the differences are bell-shaped, Wilcoxon otherwise (2026-10-02)
+
+**When:** Emre fixed this rule on 2026-10-02 around 23:45 CEST, after experiment 99 had
+started (23:35) and before any of its results existed. Fixing it first means the choice of
+test cannot be bent towards significance once the numbers are in.
+
+**The rule** (`analyze.py`), for each metric on its own (final fitness, AUC, unseen
+distance):
+
+1. For each of the 15 pairs of conditions, take the per-seed differences A − B over the
+   seeds complete in all six conditions (as D3's tests already do).
+2. Run a Shapiro-Wilk test (Shapiro & Wilk 1965) on each pair's differences and
+   Holm-correct the 15 p-values (Holm 1979). A pair whose differences are the same on
+   every seed has no shape to test: it is left out of the correction and the decision,
+   and `stats.md` says so.
+3. The metric counts as bell-shaped if no pair rejects normality after Holm at α = 0.05.
+4. **Bell-shaped:** every pair of the metric gets a two-sided paired t-test, Holm-corrected
+   across the 15 pairs, with the mean difference, its 95% confidence interval and Cohen's
+   d_z (the mean difference over the standard deviation of the differences; Lakens 2013)
+   as effect sizes. **Not bell-shaped:** every pair gets D3's Wilcoxon signed-rank test,
+   unchanged (exact p-values, median difference, rank-biserial correlation).
+5. One test per metric serves all its pairs; it is never chosen pair by pair.
+
+**Output.** `stats.md` shows, per metric, the normality table (pair, Shapiro W, p, p after
+Holm), the decision in one sentence, then the chosen test's table. `paired_tests.csv`
+names the test used in a `test` column and keeps the other test's uncorrected p-value in
+`p_other_test`, so a reader can see whether the choice mattered. `normality_<metric>.png`
+shows a normal Q-Q plot of every pair's differences, the picture behind the Shapiro-Wilk
+numbers. The Friedman test and the planned comparisons stay exactly as they were.
+
+**Why:**
+
+- **The paired t-test is the test from the lecture**, and the one most readers know. It
+  assumes that the per-seed differences are bell-shaped (normally distributed). Mild
+  departures matter little with 20 seeds, but a heavy tail or one far-off seed inflates
+  the standard deviation and can hide a real effect or fake one.
+- **The Wilcoxon signed-rank test is the usual choice for comparing evolutionary
+  algorithms** (Demšar 2006; García & Herrera 2008; Derrac et al. 2011): their results are
+  often skewed or have outliers, and a rank test needs no bell shape. It loses little when
+  the data are normal after all: its asymptotic relative efficiency against the t-test is
+  then 3/π ≈ 0.95, about 5% more seeds for the same power, and it never falls below 0.864
+  for any distribution (Hodges & Lehmann 1956).
+- **Outlying differences are plausible here.** In experiment 14 the seed (the arena)
+  explained 37% of the variance of the EA conditions' final fitness and the condition only
+  14% (best, worst, random, none and standard on 5 seeds; random search left out). A hard
+  arena can stall one condition and not another, which gives that seed a far larger
+  difference than the rest.
+- **Holm on the normality checks** keeps the chance that any of the 15 checks rejects a
+  truly bell-shaped pair by accident at 5% at most, so only clear evidence moves a metric
+  to the Wilcoxon test.
+- **One test per metric, not per pair,** so no test can be picked to suit a pair, and all
+  pairs of a metric are read the same way.
+
+**Caveat:** choosing the test from a normality pre-test is a two-stage procedure. The
+main test's p-value then depends on what the pre-test found, and simulations show that
+this can shift the error rates of both tests (Rochon, Gondan & Kieser 2012, for two
+independent samples). We limit this by fixing the rule before any result existed and by
+applying it per metric to all pairs at once, so the choice is made three times, not 45
+times. Both tests' p-values are in `paired_tests.csv`, so a reader can check whether a
+conclusion depends on the choice.
+
+**Not affected:** `probabilities.py`'s Bayesian paired t-test (D3, step 27) stays as the
+descriptive view, "how likely is A better than B?", per pair. It is no significance test
+and plays no part in this rule.
+
+**Outcome in experiment 99** (2026-10-03, 20 seeds): no pair rejects normality for the
+final fitness or the AUC, so both get the paired t-test; for the unseen distance the
+differences of best, worst and random vs none and of none vs random search are not
+bell-shaped (Holm p 0.0001-0.02: one no-migration brain, seed 17, fell off 3 of its 20
+unseen arenas within 15 s, each scored as 10 m, so its mean is 2.2 m, 0.84 m without the
+falls, although it reached fitness 0.77 on its own arena; D26), so that metric gets the Wilcoxon
+test. Among the EAs no pair is significant under either test (`paired_tests.csv`, column
+`p_other_test`).
+
+**Tried on experiment 14** (5 seeds; a check of the code, not a result): no pair rejects
+normality for any metric, so the rule picks the t-test for all three. With 5 seeds
+Shapiro-Wilk can rarely reject anything, so this says nothing about what experiment 99's
+20 seeds will show.
+
+## D26. End-result analysis — ✅ exploratory, added after experiment 99's results (2026-10-03)
+
+**Why:** experiment 99's pre-registered tests (D3, D25) mix speed (the AUC) with outcome.
+Emre asked, after seeing the results, which algorithm ends best if compute is no concern,
+with reaching the target counting most. Speed only matters when compute is limited.
+
+**What** (`end_results.py`, output `results/final/end_results.md`): for the five EAs
+(random search never reaches the target and is far behind everywhere), per run: whether
+the best brain reaches its own target in 15 s (the training length) and within 30 s
+(yes/no, `longer_walks.json`); the share of the 20 unseen arenas it reaches within 30 s
+(none arrives within 15 s); its mean fitness on the unseen arenas (15 s); and, shown but
+not tested, how many unseen walks fell off the arena within 30 s. All paired by seed and
+Holm-corrected across the 10 pairs: the yes/no measures with Cochran's Q (Cochran 1950;
+do the arrival rates differ at all?) and exact McNemar tests (McNemar 1947), the others
+with D25's rule. A per-seed ranking (mean rank, seeds best and worst on) shows consistency.
+
+**Not used:** the mean distance left after 30 s. A walk whose robot falls off the arena is
+scored as 10 m away (`simulate.FAILED_SCORE`), and in 30 s many brains walk past the strip
+and fall (38 of 2,000 EA walks; migrate best seed 23 alone 14 of 20), so that mean mostly
+counts falls. The same scoring explains experiment 99's one outlying unseen distance (D25):
+no migration, seed 17, fell off 3 of its 20 unseen arenas in 15 s.
+
+**Result (exploratory):** no end result separates the EAs significantly (own-arena
+arrivals: Cochran's Q p = 0.41 at 15 s, 0.63 at 30 s; unseen arrivals and unseen fitness:
+Wilcoxon, all Holm p ≥ 0.36). Descriptively the standard EA generalises best (12% of the
+unseen walks reach the target against 6-10%, best unseen fitness 1.739, 1 fall in 400
+walks against 6-17) and random migration has the best final fitness and is the steadiest
+(in final fitness never the worst of the five on any seed); the standard EA is
+all-or-nothing (in final fitness best on 9 seeds, worst on 7). Migrating the best brings
+the most brains to their own target (10 of 20 within 30 s) but reaches the fewest unseen
+targets (6%) and falls off most often (17). The unseen fitness also charges a fall
+(fitness 18.5), but falls within 15 s are rare (4 of 2,000 EA walks).
+
+**Caveat:** the measures were chosen after the results were known, so the analysis
+describes rather than confirms; its p-values are reported for completeness.
+
 ## References (to verify when writing the report)
 
 - Benavoli, A., Corani, G., Demšar, J., & Zaffalon, M. (2017). Time for a change: a
@@ -1650,29 +1770,52 @@ over.
   learning. *AAAI*, 34(04), 3283–3290.
 - Cantú-Paz, E. (2001). Migration policies, selection pressure, and parallel evolutionary
   algorithms. *Journal of Heuristics*, 7(4), 311–334.
+- Cochran, W. G. (1950). The comparison of percentages in matched samples. *Biometrika*,
+  37(3/4), 256–266.
 - Demšar, J. (2006). Statistical comparisons of classifiers over multiple data sets.
   *Journal of Machine Learning Research*, 7, 1–30.
+- Derrac, J., García, S., Molina, D., & Herrera, F. (2011). A practical tutorial on the use
+  of nonparametric statistical tests as a methodology for comparing evolutionary and swarm
+  intelligence algorithms. *Swarm and Evolutionary Computation*, 1(1), 3–18.
+  doi:10.1016/j.swevo.2011.02.002
 - Eiben, A. E., & Smit, S. K. (2011). Parameter tuning for configuring and analyzing
   evolutionary algorithms. *Swarm and Evolutionary Computation*, 1(1), 19–31.
 - Eiben, A. E., & Smith, J. E. (2015). *Introduction to Evolutionary Computing* (2nd ed.).
   Springer. (Chapters on island models, selection pressure and recombination.)
 - Eshelman, L. J., & Schaffer, J. D. (1993). Real-coded genetic algorithms and
   interval-schemata. *FOGA 2*, 187–202.
+- García, S., & Herrera, F. (2008). An extension on "Statistical comparisons of classifiers
+  over multiple data sets" for all pairwise comparisons. *Journal of Machine Learning
+  Research*, 9, 2677–2694.
 - Gomez, F., & Miikkulainen, R. (1997). Incremental evolution of complex general behavior.
   *Adaptive Behavior*, 5(3–4), 317–342.
 - Hancock, P. J. B. (1992). Genetic algorithms and permutation problems: a comparison of
   recombination operators for neural net structure specification. *COGANN-92*, 108–122.
+- Hodges, J. L., Jr., & Lehmann, E. L. (1956). The efficiency of some nonparametric
+  competitors of the t-test. *Annals of Mathematical Statistics*, 27(2), 324–335.
+- Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian
+  Journal of Statistics*, 6(2), 65–70.
 - Jakobi, N. (1997). Evolutionary robotics and the radical envelope-of-noise hypothesis.
   *Adaptive Behavior*, 6(2), 325–368.
 - Jones, T. (1995). Crossover, macromutation, and population-based search. *ICGA-95*, 73–80.
 - Kerby, D. S. (2014). The simple difference formula: an approach to teaching
   nonparametric correlation. *Comprehensive Psychology*, 3, 11.IT.3.1.
+- Lakens, D. (2013). Calculating and reporting effect sizes to facilitate cumulative
+  science: a practical primer for t-tests and ANOVAs. *Frontiers in Psychology*, 4, 863.
+  doi:10.3389/fpsyg.2013.00863
+- McNemar, Q. (1947). Note on the sampling error of the difference between correlated
+  proportions or percentages. *Psychometrika*, 12(2), 153–157.
 - Montana, D. J., & Davis, L. (1989). Training feedforward neural networks using genetic
   algorithms. *IJCAI-89*, 762–767.
 - Moriarty, D. E., & Miikkulainen, R. (1996). Efficient reinforcement learning through
   symbiotic evolution. *Machine Learning*, 22, 11–32.
+- Rochon, J., Gondan, M., & Kieser, M. (2012). To test or not to test: preliminary
+  assessment of normality when comparing two independent samples. *BMC Medical Research
+  Methodology*, 12, 81. doi:10.1186/1471-2288-12-81
 - Schaffer, J. D., Whitley, D., & Eshelman, L. J. (1992). Combinations of genetic
   algorithms and neural networks: A survey of the state of the art. *COGANN-92*.
+- Shapiro, S. S., & Wilk, M. B. (1965). An analysis of variance test for normality
+  (complete samples). *Biometrika*, 52(3–4), 591–611.
 - Skolicki, Z., & De Jong, K. (2005). The influence of migration sizes and intervals on
   island models. *GECCO '05*, 1295–1302.
 - Stanley, K. O., & Miikkulainen, R. (2002). Evolving neural networks through augmenting
