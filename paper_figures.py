@@ -1,23 +1,35 @@
 """The report's figures, sized and styled for the ACM sigconf (GECCO) template.
 
     uv run --project ../ariel python paper_figures.py
+    uv run --project ../ariel python paper_figures.py --final results/olympic \\
+        --out results/olympic/figures   # experiment 14's, next to its runs
 
-Reads the runs of experiments 14 and 26 in `results/olympic/` and writes a
-vector PDF and a PNG preview of each figure into `report/figures/`:
+Writes a vector PDF and a PNG preview of each figure into `--out` (default
+`report/figures/`). Every figure but one shows the final experiment, 99: the
+six condition folders in `--final` (default `results/final/`). The interval
+figure shows experiment 26, from `--olympic` (default `results/olympic/`),
+since 99 migrates at one interval only:
 
     convergence     best fitness and closest distance so far against
-                    generations: mean ± standard deviation over the 5 seeds of
-                    every condition of experiment 14 (the line plot the spec
-                    asks for)
-    interval        experiment 26: final fitness and unseen-arena distance per
-                    seed for each migration interval of the best policy, and
-                    how often every island holds the same champion
-    longer_walks    trained on 15 s walks: the brains that reach the target on
-                    their own arena with more time, and on 20 unseen arenas
+                    generations: mean ± standard deviation over the seeds of
+                    every condition (the line plot the spec asks for)
+    final_spread    every seed's final fitness and unseen-arena distance for
+                    each EA: a box (median and quartiles) and a dot per seed
     probabilities   P(row converges faster than column): the Bayesian paired
                     t-test on the AUC (`probabilities.py`)
     fitness_terms   what each fitness term contributes to the champions'
-                    fitness, from the champion's record in `database.db`
+                    fitness, from the champion's walk on its own arena in
+                    `unseen.json`
+    longer_walks    trained on 15 s walks: the brains that reach the target on
+                    their own arena with more time, and on 20 unseen arenas
+    interval        experiment 26: final fitness and unseen-arena distance per
+                    seed for each migration interval of the best policy, and
+                    how often every island holds the same champion
+
+A figure is skipped, with a message, while its inputs are missing: a condition
+without runs, or a run without the `unseen.py`, `longer_walks.py` or
+`summary.json` output that figure reads. `--final results/olympic` draws the
+same figures from experiment 14, which has the same folder layout.
 
 Every condition makes 80 evaluations in generation 0 and 72 children per
 generation after it (4 islands x 18, or 1 x 72 for the standard EA; random
@@ -25,8 +37,8 @@ search draws 72 new genotypes), so all of them share one generation axis.
 """
 
 # Standard library
+import argparse
 import json
-import sqlite3
 from pathlib import Path
 
 # Third-party libraries
@@ -39,14 +51,16 @@ import numpy.typing as npt
 import pandas as pd
 
 # Local libraries
-from analyze import CONDITION_COLOURS, best_so_far, on_grid
+from analyze import CONDITION_COLOURS, best_so_far, on_grid, warn_about_short_runs
+from ea import LOG_ROUNDING
 from longer_walks import LONG_TEST
 from probabilities import DEFAULT_ROPE, mean_interval, pair_rows, run_table, runs_of
 from rq_figure import CONDITIONS, DIVERGING, EAS, label
 from simulate import TARGET_RADIUS, Score, SimConfig, saved_sim_config
 
 ROOT = Path(__file__).parent
-OLYMPIC = ROOT / "results" / "olympic"
+FINAL = ROOT / "results" / "final"  # experiment 99
+OLYMPIC = ROOT / "results" / "olympic"  # experiments 14 and 26
 OUT = ROOT / "report" / "figures"
 
 COLUMN = 3.33  # ACM sigconf column width, inches
@@ -138,13 +152,41 @@ def panel(axis: plt.Axes, letter: str, x: float = -0.16) -> None:
     )
 
 
-def save(figure: plt.Figure, name: str) -> None:
+def save(figure: plt.Figure, name: str, out: Path) -> None:
     """The figure as a vector PDF and a PNG preview."""
-    OUT.mkdir(parents=True, exist_ok=True)
-    figure.savefig(OUT / f"{name}.pdf", facecolor="white")
-    figure.savefig(OUT / f"{name}.png", dpi=300, facecolor="white")
+    out.mkdir(parents=True, exist_ok=True)
+    figure.savefig(out / f"{name}.pdf", facecolor="white")
+    figure.savefig(out / f"{name}.png", dpi=300, facecolor="white")
     plt.close(figure)
-    print(f"written {OUT / name}.pdf")
+    print(f"written {out / name}.pdf")
+
+
+def missing_inputs(name: str, folders: list[Path], files: tuple[str, ...] = ()) -> bool:
+    """Whether figure `name` lacks inputs; if so, says what is missing.
+
+    Every condition folder needs runs (`seed*/` with a `log.csv`), and every
+    run each of `files`.
+    """
+    for folder in folders:
+        if not runs_of(folder):
+            print(f"{name}.pdf skipped: no seed*/log.csv in {folder}")
+            return True
+    runs = [run for folder in folders for run in runs_of(folder)]
+    for file in files:
+        missing = [run for run in runs if not (run / file).exists()]
+        if missing:
+            print(
+                f"{name}.pdf skipped: no {file} in {len(missing)} of "
+                f"{len(runs)} run folders"
+            )
+            return True
+    return False
+
+
+def seeds_per_condition(folders: list[Path]) -> str:
+    """The number of runs per condition as a figure words it: "20", or "19-20"."""
+    counts = sorted({len(runs_of(folder)) for folder in folders})
+    return str(counts[0]) if len(counts) == 1 else f"{counts[0]}-{counts[-1]}"
 
 
 def generation_size(ea: dict[str, object]) -> tuple[int, int]:
@@ -201,19 +243,36 @@ def weighted_terms(score: Score, sim: SimConfig) -> dict[str, float]:
 
 
 def champion(run: Path) -> tuple[float, Score]:
-    """The run's best fitness and the Score it was computed from."""
-    with sqlite3.connect(run / "database.db") as database:
-        fitness, tags = database.execute(
-            "SELECT fitness_, tags_ FROM individual "
-            "WHERE fitness_ IS NOT NULL ORDER BY fitness_ LIMIT 1"
-        ).fetchone()
-    parts = json.loads(tags)
-    return float(fitness), Score(**{k: parts[k] for k in Score.__dataclass_fields__})
+    """The run's best fitness and the Score it was computed from.
+
+    Read from `unseen.json`, where `unseen.py` walked the run's best network
+    on its own arena again. A walk on a saved arena is deterministic (D10),
+    so it repeats the champion's evaluation exactly: for all 30 runs of
+    experiment 14 it matches the champion's record in `database.db` to the
+    last digit. Unlike the database, it is small enough to share, and it is
+    complete for a resumed run (D24), whose champion may sit in an older
+    `database_part<N>.db`. Raises ValueError unless the run walked one arena
+    and the walk scored the run's best fitness (`summary.json`; after a
+    resume that can be the log's, rounded to 4 decimals).
+    """
+    training = json.loads((run / "unseen.json").read_text())["training"]
+    if len(training["scores"]) != 1:
+        msg = f"{run}: trained on {len(training['scores'])} arenas, not one"
+        raise ValueError(msg)
+    fitness = float(training["fitness"][0])
+    best = json.loads((run / "summary.json").read_text())["best_fitness_seen"]
+    if abs(fitness - best) > LOG_ROUNDING:
+        msg = f"{run}: its best scored {fitness} in unseen.json, {best} in the run"
+        raise ValueError(msg)
+    parts = training["scores"][0]
+    return fitness, Score(**{k: parts[k] for k in Score.__dataclass_fields__})
 
 
-def convergence() -> None:
+def convergence(final: Path, out: Path) -> None:
     """Best fitness and closest distance so far, mean ± std over seeds."""
-    folders = [OLYMPIC / condition for condition in CONDITIONS]
+    folders = [final / condition for condition in CONDITIONS]
+    if missing_inputs("convergence", folders):
+        return
     generations, evaluations = common_generations(folders)
     curves = {f.name: [best_so_far(run) for run in runs_of(f)] for f in folders}
     figure, axes = plt.subplots(1, 2, figsize=(TEXT_WIDTH, 2.35))
@@ -280,12 +339,73 @@ def convergence() -> None:
         columnspacing=1.4,
     )
     figure.tight_layout(w_pad=2.5)
-    save(figure, "convergence")
+    save(figure, "convergence", out)
 
 
-def interval() -> None:
+def final_spread(final: Path, out: Path) -> None:
+    """Every seed's final fitness and unseen distance: a box per EA, dots on top.
+
+    Random search is left out, as in the probabilities figure: far behind
+    every EA, it would squash their boxes into a corner.
+    """
+    folders = [final / condition for condition in EAS]
+    if missing_inputs("final_spread", folders, ("unseen.json",)):
+        return
+    table = run_table(folders)
+    figure, axes = plt.subplots(1, 2, figsize=(COLUMN, 1.9), sharey=True)
+    rng = np.random.default_rng(0)
+    measures = (
+        ("final_fitness", "final best fitness"),
+        ("unseen_distance", "unseen distance (m)"),
+    )
+    for axis, (metric, xlabel) in zip(axes, measures, strict=True):
+        for y, condition in enumerate(EAS):
+            values = table.loc[table["condition"] == condition, metric].to_numpy()
+            colour = CONDITION_COLOURS[condition]
+            line = {"color": colour, "linewidth": 0.8}
+            axis.boxplot(
+                values,
+                positions=[y],
+                orientation="horizontal",
+                widths=0.62,
+                showfliers=False,  # the dots show every seed
+                manage_ticks=False,
+                patch_artist=True,
+                boxprops={
+                    "facecolor": mpl.colors.to_rgba(colour, 0.14),
+                    "edgecolor": colour,
+                    "linewidth": 0.8,
+                },
+                medianprops={"color": INK, "linewidth": 1.0},
+                whiskerprops=line,
+                capprops=line,
+                zorder=2,
+            )
+            axis.scatter(
+                values,
+                y + rng.uniform(-0.2, 0.2, len(values)),
+                s=5,
+                color=colour,
+                alpha=0.85,
+                linewidths=0,
+                zorder=3,
+            )
+        print_axis(axis, grid="x")
+        axis.set_xlabel(xlabel)
+    axes[0].set_yticks(range(len(EAS)), [label(c) for c in EAS])
+    axes[0].set_ylim(len(EAS) - 0.5, -0.5)  # the first condition on top
+    axes[1].tick_params(axis="y", length=0)
+    panel(axes[0], "a", x=-0.12)
+    panel(axes[1], "b", x=-0.12)
+    figure.tight_layout(w_pad=1.0)
+    save(figure, "final_spread", out)
+
+
+def interval(olympic: Path, out: Path) -> None:
     """Experiment 26: the final fitness, unseen distance and shared champions."""
-    folders = [OLYMPIC / name for name in INTERVALS]
+    folders = [olympic / name for name in INTERVALS]
+    if missing_inputs("interval", folders, ("unseen.json",)):
+        return
     table = run_table(folders)
     names = list(INTERVALS)
     figure = plt.figure(figsize=(COLUMN, 3.0))
@@ -331,7 +451,7 @@ def interval() -> None:
     shares = {
         name: [
             shared_champion_share(pd.read_csv(run / "log.csv", dtype={"island": str}))
-            for run in runs_of(OLYMPIC / name)
+            for run in runs_of(olympic / name)
         ]
         for name in names
     }
@@ -371,7 +491,7 @@ def interval() -> None:
     panel(final_axis, "a", x=-0.38)
     panel(unseen_axis, "b", x=-0.38)
     panel(shared_axis, "c", x=-0.155)
-    save(figure, "interval")
+    save(figure, "interval", out)
 
 
 def reach_shares(runs: list[Path]) -> dict[str, tuple[float, float]]:
@@ -397,16 +517,23 @@ def reach_shares(runs: list[Path]) -> dict[str, tuple[float, float]]:
     return {"own": (own[0], own[1]), "unseen": (unseen[0], unseen[1])}
 
 
-def longer_walks() -> None:
+def longer_walks(final: Path, out: Path) -> None:
     """Brains that reach the target at 15 s and with 30 s, own arena and unseen."""
+    folders = [final / condition for condition in CONDITIONS]
+    needed = ("longer_walks.json", "unseen.json", f"unseen_{LONG_TEST:g}s.json")
+    if missing_inputs("longer_walks", folders, needed):
+        return
+    shares = {folder.name: reach_shares(runs_of(folder)) for folder in folders}
+    seeds = max(len(runs_of(folder)) for folder in folders)
+    reached = max(max(share["unseen"]) for share in shares.values())
+    unseen_top = max(15.0, 5 * np.ceil(reached / 5))  # 15%, or the next 5% up
     figure, (own_axis, unseen_axis) = plt.subplots(
         1, 2, figsize=(COLUMN, 1.85), sharey=True
     )
     for y, condition in enumerate(CONDITIONS):
-        shares = reach_shares(runs_of(OLYMPIC / condition))
         colour = CONDITION_COLOURS[condition]
         for axis, key in ((own_axis, "own"), (unseen_axis, "unseen")):
-            short, long = shares[key]
+            short, long = shares[condition][key]
             axis.plot([short, long], [y, y], color=colour, linewidth=1.0, zorder=2)
             axis.scatter(
                 short, y, s=14, facecolor="white", edgecolor=colour, lw=0.9, zorder=3
@@ -416,11 +543,13 @@ def longer_walks() -> None:
         print_axis(axis, grid="x")
     own_axis.set_yticks(range(len(CONDITIONS)), [label(c) for c in CONDITIONS])
     own_axis.invert_yaxis()
-    own_axis.set_xlim(-0.3, 5.3)
-    own_axis.set_xticks(range(6))
-    own_axis.set_xlabel("own arena:\nbrains reaching it (of 5)")
-    unseen_axis.set_xlim(-0.8, 15)
-    unseen_axis.set_xticks([0, 5, 10, 15])
+    own_axis.set_xlim(-0.06 * seeds, 1.06 * seeds)
+    own_axis.set_xticks(np.arange(0, seeds + 1, 1 if seeds <= 6 else 5))
+    own_axis.set_xlabel(
+        f"own arena:\nbrains reaching it (of {seeds_per_condition(folders)})"
+    )
+    unseen_axis.set_xlim(-0.8 * unseen_top / 15, unseen_top)
+    unseen_axis.set_xticks(np.arange(0, unseen_top + 1, 5 if unseen_top <= 20 else 10))
     unseen_axis.set_xlabel("20 unseen arenas:\nwalks reaching it (%)")
     unseen_axis.tick_params(axis="y", length=0)
     unseen_axis.scatter([], [], s=14, facecolor="white", edgecolor=MUTED, label="15 s")
@@ -431,12 +560,15 @@ def longer_walks() -> None:
     panel(own_axis, "a", x=-0.12)
     panel(unseen_axis, "b", x=-0.12)
     figure.tight_layout(w_pad=1.0)
-    save(figure, "longer_walks")
+    save(figure, "longer_walks", out)
 
 
-def probabilities() -> None:
+def probabilities(final: Path, out: Path) -> None:
     """P(row converges faster than column), from the AUC, paired by seed."""
-    table = run_table([OLYMPIC / condition for condition in EAS])
+    folders = [final / condition for condition in EAS]
+    if missing_inputs("probabilities", folders):
+        return
+    table = run_table(folders)
     pairs = pd.DataFrame(pair_rows(table, "auc", DEFAULT_ROPE))
     matrix = np.full((len(EAS), len(EAS)), np.nan)
     for i, a in enumerate(EAS):
@@ -467,34 +599,28 @@ def probabilities() -> None:
     for side in axis.spines.values():
         side.set_visible(False)
     axis.tick_params(length=0, labelcolor=INK)
-    save(figure, "probabilities")
+    save(figure, "probabilities", out)
 
 
-def fitness_terms() -> None:
+def fitness_terms(final: Path, out: Path) -> None:
     """The champion's fitness split into its weighted terms, mean over seeds.
 
-    Needs every run's `database.db`, the one file that is too big to share;
-    without them the figure is skipped.
+    Needs every run's `unseen.json` (`champion`) and `summary.json`; without
+    them the figure is skipped.
     """
-    runs = {condition: runs_of(OLYMPIC / condition) for condition in CONDITIONS}
-    missing = [
-        r for rs in runs.values() for r in rs if not (r / "database.db").exists()
-    ]
-    if missing:
-        print(
-            f"fitness_terms.pdf skipped: no database.db in {len(missing)} run folders"
-        )
+    folders = [final / condition for condition in CONDITIONS]
+    if missing_inputs("fitness_terms", folders, ("unseen.json", "summary.json")):
         return
     rows = []
-    for condition in CONDITIONS:
-        for run in runs[condition]:
+    for folder in folders:
+        for run in runs_of(folder):
             sim = saved_sim_config(json.loads((run / "config.json").read_text())["sim"])
             fitness, score = champion(run)
             terms = weighted_terms(score, sim)
             if not np.isclose(sum(terms.values()), fitness, atol=1e-6):
                 msg = f"{run}: terms sum to {sum(terms.values())}, fitness {fitness}"
                 raise ValueError(msg)
-            rows.append({"condition": condition, **terms})
+            rows.append({"condition": folder.name, **terms})
     means = pd.DataFrame(rows).groupby("condition").mean().loc[list(CONDITIONS)]
     used = [term for term in TERMS if means[term].abs().max() > 0]
     figure, axis = plt.subplots(figsize=(COLUMN, 2.0))
@@ -519,7 +645,9 @@ def fitness_terms() -> None:
     axis.set_yticks(range(len(CONDITIONS)), [label(c) for c in CONDITIONS])
     axis.invert_yaxis()
     axis.set_xlim(0, max(left) + 0.35)
-    axis.set_xlabel("champion's fitness by term (mean of 5 seeds)")
+    axis.set_xlabel(
+        f"champion's fitness by term (mean of {seeds_per_condition(folders)} seeds)"
+    )
     axis.legend(
         frameon=False,
         loc="upper center",
@@ -528,16 +656,40 @@ def fitness_terms() -> None:
         handlelength=1.2,
         columnspacing=0.9,
     )
-    save(figure, "fitness_terms")
+    save(figure, "fitness_terms", out)
 
 
 def main() -> None:
-    """Write every figure."""
-    convergence()
-    interval()
-    longer_walks()
-    probabilities()
-    fitness_terms()
+    """Write every figure whose inputs are there."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--final",
+        type=Path,
+        default=FINAL,
+        help="the final experiment's condition folders (default: results/final)",
+    )
+    parser.add_argument(
+        "--olympic",
+        type=Path,
+        default=OLYMPIC,
+        help="experiment 26's condition folders, with experiment 14's best and "
+        "none, for the interval figure (default: results/olympic)",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=OUT,
+        help="where the PDFs and PNGs go (default: report/figures)",
+    )
+    args = parser.parse_args()
+
+    warn_about_short_runs({c: runs_of(args.final / c) for c in CONDITIONS})
+    convergence(args.final, args.out)
+    final_spread(args.final, args.out)
+    probabilities(args.final, args.out)
+    fitness_terms(args.final, args.out)
+    longer_walks(args.final, args.out)
+    interval(args.olympic, args.out)
 
 
 if __name__ == "__main__":

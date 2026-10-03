@@ -1,15 +1,25 @@
 """analyze.py and unseen.py on hand-made data, where the right answers are known."""
 
 import json
+import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.stats import shapiro, ttest_rel
 
+import analyze
 from analyze import (
+    T_TEST,
+    WILCOXON,
+    bell_shaped,
+    complete_blocks,
     friedman,
     holm,
+    normality_checks,
+    pair_differences,
     paired_comparisons,
     planned_comparisons,
     rank_biserial,
@@ -340,3 +350,153 @@ def test_a_condition_without_the_metric_is_left_out() -> None:
     (test,) = paired_comparisons(table, "unseen_distance")
     assert (test.a, test.b, test.pairs) == ("a", "b", 20)
     assert "Left out, no values for this metric: c." in stats_report(table, "b")
+
+
+def test_bell_shaped_differences_get_the_paired_t_test() -> None:
+    """D25: normal noise only, so no pair rejects normality and every pair gets
+    the paired t-test, whose numbers are scipy's ttest_rel on A and B."""
+    table = make_seeds({"best": -0.1, "none": 0.0, "worst": 0.0})
+    checks = normality_checks(pair_differences(table, "final_fitness"))
+    assert len(checks) == 3 and bell_shaped(checks)
+    blocks = complete_blocks(table, "final_fitness")
+    tests = paired_comparisons(table, "final_fitness")
+    for test in tests:
+        assert test.test == T_TEST
+        scipy_test = ttest_rel(blocks[test.a], blocks[test.b])
+        interval = scipy_test.confidence_interval(confidence_level=0.95)
+        assert test.p == pytest.approx(scipy_test.pvalue, rel=1e-6)
+        assert (test.ci_low, test.ci_high) == pytest.approx(
+            (interval.low, interval.high), rel=1e-6
+        )
+        differences = blocks[test.a] - blocks[test.b]
+        assert test.mean_difference == pytest.approx(differences.mean())
+        assert test.cohen_dz == pytest.approx(differences.mean() / differences.std())
+        assert test.p_other_test == pytest.approx(
+            signed_rank_p(np.round(differences.to_numpy(), 9))
+        )
+    best = tests[0]
+    assert (best.a, best.b) == ("best", "none") and best.p_holm < 0.05
+    assert best.cohen_dz < -2  # 0.1 better against a noise sd of about 0.03
+
+
+def test_one_outlying_seed_switches_every_pair_to_wilcoxon() -> None:
+    """A hard arena can give one seed a far larger difference than the rest:
+    the pairs with that seed fail the check, and then all pairs, including the
+    one that looks normal, get the Wilcoxon test."""
+    table = make_seeds({"a": 0.0, "b": 0.0, "c": 0.0})
+    outlier = (table["condition"] == "a") & (table["run"] == "seed0")
+    table.loc[outlier, "final_fitness"] += 1.0
+    differences = pair_differences(table, "final_fitness")
+    checks = {(c.a, c.b): c for c in normality_checks(differences)}
+    assert checks[("a", "b")].p_holm < 0.05 and checks[("a", "c")].p_holm < 0.05
+    assert checks[("b", "c")].p_holm >= 0.05
+    blocks = complete_blocks(table, "final_fitness")
+    for test in paired_comparisons(table, "final_fitness"):
+        assert test.test == WILCOXON
+        assert test.p == signed_rank_p(differences[(test.a, test.b)])
+        t_p = ttest_rel(blocks[test.a], blocks[test.b]).pvalue
+        assert test.p_other_test == pytest.approx(t_p, rel=1e-6)
+    report = stats_report(table, "a")
+    assert "normality is rejected for a vs b, a vs c" in report
+    assert "| A vs B | median A − B | r | p | p (Holm) |" in report
+
+
+def test_skewed_differences_get_wilcoxon() -> None:
+    """Exponential differences: a few seeds gain a lot, most a little."""
+    table = make_seeds({"a": 0.0, "b": 0.0})
+    a_rows = table["condition"] == "a"
+    table.loc[a_rows, "auc"] += np.random.default_rng(3).exponential(0.2, 20)
+    assert not bell_shaped(normality_checks(pair_differences(table, "auc")))
+    (test,) = paired_comparisons(table, "auc")
+    assert test.test == WILCOXON
+
+
+def test_a_pair_with_no_spread_is_left_out_of_the_decision() -> None:
+    """b is a + 0.1 on every seed and d is a copy of a: their pairs have no
+    shape to check. The decision rests on the pairs with c, and the t-test
+    still gives the no-spread pairs a sensible result, without warnings."""
+    table = make_seeds({"a": -0.1, "c": 0.0})
+    a_rows = table[table["condition"] == "a"]
+    shifted = a_rows.assign(condition="b", final_fitness=a_rows["final_fitness"] + 0.1)
+    table = pd.concat([table, shifted, a_rows.assign(condition="d")])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        checks = normality_checks(pair_differences(table, "final_fitness"))
+        tests = {(t.a, t.b): t for t in paired_comparisons(table, "final_fitness")}
+        report = stats_report(table, "c")
+    unchecked = {(c.a, c.b) for c in checks if c.unchecked}
+    assert unchecked == {("a", "b"), ("a", "d"), ("b", "d")}
+    assert all(np.isnan(c.p_holm) for c in checks if c.unchecked)
+    assert bell_shaped(checks)  # the three pairs with c are normal noise
+    assert {t.test for t in tests.values()} == {T_TEST}
+    assert (tests[("a", "d")].p, tests[("a", "d")].cohen_dz) == (1.0, 0.0)
+    assert tests[("a", "b")].p == 0.0 and tests[("a", "b")].cohen_dz == -np.inf
+    assert tests[("a", "b")].ci_low == pytest.approx(-0.1)
+    assert "| a vs b | – | – | the same difference on every seed |" in report
+    assert "could not be checked take no part in the decision" in report
+    # Fewer than 3 seeds: nothing can be checked, so the Wilcoxon test stays.
+    (two_seeds,) = normality_checks({("a", "b"): np.array([0.1, 0.3])})
+    assert two_seeds.unchecked == "needs ≥ 3 seeds"
+    assert not bell_shaped([two_seeds])
+    only_ties = make_seeds({"a": 0.0})
+    only_ties = pd.concat([only_ties, only_ties.assign(condition="b")])
+    assert "no pair could be checked" in stats_report(only_ties, "a")
+
+
+def test_the_shapiro_p_values_are_holm_corrected_over_the_checked_pairs() -> None:
+    """[0, 0, 0, 2, 5] alone would reject normality (p = 0.033), but not after
+    Holm over the 4 pairs that can be checked; the 5th, with no spread, does
+    not count in the correction."""
+    differences = {
+        ("a", "b"): np.array([0.0, 0.0, 0.0, 2.0, 5.0]),
+        ("a", "c"): np.array([1.0, 2.0, 3.0, 4.0, 5.0]),
+        ("a", "d"): np.array([-1.0, 0.5, 0.0, 1.0, -0.4]),
+        ("b", "c"): np.array([2.0, 2.5, 1.5, 2.2, 1.9]),
+        ("b", "d"): np.full(5, 0.3),
+    }
+    checks = normality_checks(differences)
+    raw = [shapiro(d).pvalue for pair, d in differences.items() if pair != ("b", "d")]
+    assert [c.p for c in checks[:4]] == pytest.approx(raw)
+    assert [c.p_holm for c in checks[:4]] == pytest.approx(holm(raw))
+    assert checks[0].p < 0.05 and checks[0].p_holm == pytest.approx(4 * checks[0].p)
+    assert checks[4].unchecked and bell_shaped(checks)
+
+
+def write_runs(folder: Path, finals: list[float]) -> None:
+    """Fake finished runs of one condition: two generations each, ending at
+    `finals[seed]`, logged as `run.py` logs them."""
+    for seed, final in enumerate(finals):
+        run = folder / f"seed{seed}"
+        run.mkdir(parents=True)
+        (run / "config.json").write_text(json.dumps({"ea": {"max_evaluations": 160}}))
+        (run / "log.csv").write_text(
+            "generation,evaluations,island,best,best_distance\n"
+            f"0,80,all,3.0,1.0\n1,160,all,{final},0.5\n"
+        )
+
+
+def test_experiment_14_sized_runs_give_a_test_column_and_figures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """analyze.py end to end on 6 conditions x 5 seeds, the size of experiment
+    14: paired_tests.csv names the test used and keeps the other test's p, and
+    there is one Q-Q figure per tested metric (no unseen test here)."""
+    effects = {"best": -0.1, "worst": 0.0, "random": -0.05, "none": 0.0}
+    table = make_seeds({**effects, "standard": -0.15, "random_search": 1.0}, seeds=5)
+    folders = []
+    for condition, group in table.groupby("condition", sort=False):
+        write_runs(tmp_path / condition, group["final_fitness"].round(4).tolist())
+        folders.append(str(tmp_path / condition))
+    out = tmp_path / "analysis"
+    monkeypatch.setattr(sys, "argv", ["analyze.py", *folders, "--out", str(out)])
+    analyze.main()
+    paired = pd.read_csv(out / "paired_tests.csv")
+    assert len(paired) == 2 * 15  # final fitness and AUC, 15 pairs each
+    assert set(paired["test"]) <= {T_TEST, WILCOXON}
+    assert paired.groupby("metric")["test"].nunique().eq(1).all()  # one per metric
+    assert paired["p_other_test"].between(0.0, 1.0).all()
+    stats = (out / "stats.md").read_text()
+    assert stats.count("**Decision:**") == 2 and "5 seeds in every condition" in stats
+    for metric in ("final_fitness", "auc"):
+        assert (out / f"normality_{metric}.png").stat().st_size > 0
+    assert not (out / "normality_unseen_distance.png").exists()
