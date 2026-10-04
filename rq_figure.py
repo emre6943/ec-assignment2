@@ -1,4 +1,6 @@
-"""The research question's answer in one figure (experiment 14, D3).
+"""Experiment 14's results in one figure (D3); not a figure of the paper.
+
+`paper_figures.py` imports its condition names and labels from here.
 
     uv run --project ../ariel python rq_figure.py                    # fitness
     uv run --project ../ariel python rq_figure.py --metric distance  # metres

@@ -1,7 +1,23 @@
 """Run one configuration for one or more seeds.
 
-    uv run --project ../ariel python run.py --policy best --seeds 0 1 2 3 4
-    uv run --project ../ariel python run.py --algorithm random_search --seeds 0 1 2
+The defaults are the settings of the early experiments, not the paper's (see
+`ea.EAConfig` and `simulate.SimConfig`). The paper's 120 runs come from
+`experiments/99_final_experiment.sh`, which passes the final settings as flags.
+One of its runs (migrate best, seed 10) by hand, into a new folder:
+
+    uv run --project ../ariel python run.py --policy best --seeds 10 \\
+        --world olympic --body spider_8 --duration 15 --no-evolve-tempo \\
+        --no-vision --clock-boost 1 --hidden-layers 8,4 \\
+        --ground-contact-weight 1.0 --low-body-weight 1.0 --carry-height 0.04 \\
+        --work-imbalance-weight 0.5 --leg-imbalance-weight 0 \\
+        --speed-weight 0.5 --stop-at-target \\
+        --crossover-probability 0.9 --ariel-spawn --max-evaluations 12000 \\
+        --migration-interval 20 --out results/example/best
+
+The other conditions swap `--policy best` for `--policy worst|random|none`,
+`--standard` or `--algorithm random_search`. A new results folder builds new
+arenas; the paper's are in results/final/terrains/. `--help` lists every
+option, with those that only earlier experiments used in a group of their own.
 
 Each run writes to results/<condition>/seed<S>/:
 
@@ -62,59 +78,137 @@ WORLDS = {
 }
 
 
+# The EAConfig / SimConfig fields that only earlier experiments changed, and
+# the experiments that did. The final experiment (99) leaves them at their
+# defaults, which switch them off; `--help` lists them in a group of their own.
+EARLIER_ONLY: dict[str, str] = {
+    "terrain_mode": "per_generation in experiments 1-3 (D10)",
+    "n_terrains": "experiment 21 (D23)",
+    "spawn_yaws": "experiment 21 (D23)",
+    "curriculum": "experiment 6 (D16)",
+    "curriculum_movement_weight": "with --curriculum, experiment 6 (D16)",
+    "curriculum_generations": "with --curriculum or --early-stop, experiment 6",
+    "early_stop": "experiment 6 (D16)",
+    "early_stop_progress_start": "with --early-stop, experiment 6 (D16)",
+    "early_stop_progress_end": "with --early-stop, experiment 6 (D16)",
+    "early_stop_time": "with --early-stop, experiment 6 (D16)",
+    "final_duration": "experiment 20 (D21)",
+    "final_duration_from": "with --final-duration, experiment 20 (D21)",
+    "stall_generations": "experiments 16-22 (D19)",
+    "max_sigma": "with --stall-generations, experiments 16-22 (D19)",
+    "init_from": "experiments/x_best_walk.sh",
+    "position": "experiment 29",
+    "vision_rays": "with vision on, experiments 18-23 (D5)",
+}
+# The paper's value of every final-experiment setting that differs from its
+# default or was set otherwise in some experiment, as 99_final_experiment.sh
+# passes it (tests/test_final_config.py checks that its flags give these).
+NOTES: dict[str, str] = {
+    "migration_interval": "20 in the paper (D11)",
+    "crossover_probability": "0.9 in the paper (D7, D22)",
+    "crossover": "neuron in the paper; experiment 25 tried the others (D7)",
+    "clock_boost": "1 in the paper; 3 in experiments 13 and 15-18 (D17)",
+    "ariel_spawn": "on in the paper (D2a)",
+    "vision": "off in the paper (D5)",
+    "hidden_layers": "8,4 in the paper (D6)",
+    "evolve_tempo": "off in the paper; on in experiment 13 (D17)",
+    "ground_contact_weight": "1.0 in the paper (D18)",
+    "low_body_weight": "1.0 in the paper (D18)",
+    "carry_height": "0.04 in the paper (D18)",
+    "work_imbalance_weight": "0.5 in the paper (D18)",
+    "speed_weight": "0.5 in the paper (D20)",
+    "stop_at_target": "on in the paper (D20)",
+}
+
+
 def build_parser() -> argparse.ArgumentParser:
-    """Every EAConfig / SimConfig field becomes an optional flag."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--algorithm", choices=("island", "random_search"), default="island"
+    """Every EAConfig / SimConfig field becomes an optional flag.
+
+    The flags are grouped for `--help`: what a run is, the settings the
+    final experiment (99) uses, and those only earlier experiments used.
+    """
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0],
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--policy", choices=POLICIES, default="best")
-    parser.add_argument(
+    runs = parser.add_argument_group("which runs, and where")
+    runs.add_argument(
+        "--algorithm",
+        choices=("island", "random_search"),
+        default="island",
+        help="the island EA, or the random-search baseline",
+    )
+    runs.add_argument(
+        "--policy",
+        choices=POLICIES,
+        default="best",
+        help="the emigrant selection: the research question's conditions",
+    )
+    runs.add_argument(
         "--standard",
         action="store_true",
         help="a standard EA: one population of n_islands x island_size, no migration",
     )
-    parser.add_argument(
-        "--world", choices=tuple(WORLDS), default="olympic", help="an ARIEL world"
+    runs.add_argument(
+        "--world",
+        choices=tuple(WORLDS),
+        default="olympic",
+        help="an ARIEL world: olympic in the paper (D2), rugged in experiments "
+        "1-13, flat for debugging; amphitheatre and crater were never used",
     )
-    parser.add_argument("--seeds", type=int, nargs="+", default=[0])
-    parser.add_argument("--workers", type=int, default=10)
-    parser.add_argument(
+    runs.add_argument("--seeds", type=int, nargs="+", default=[0], help="run seeds")
+    runs.add_argument("--workers", type=int, default=10, help="parallel walks")
+    runs.add_argument(
         "--skip-done",
         action="store_true",
         help="skip seeds that already finished with exactly these settings",
     )
-    parser.add_argument(
-        "--out", type=Path, default=None, help="default: results/<condition>"
+    runs.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="the folder for the seed<S>/ folders; None means results/<condition>",
     )
-    parser.add_argument(
+    runs.add_argument(
         "--resume",
         action="store_true",
         help="continue an unfinished run (crash, power cut) from its database",
     )
 
+    final = parser.add_argument_group(
+        "settings used by the final experiment (99)",
+        "Several defaults are the early experiments' values, not the paper's; "
+        "the paper's are the flags in experiments/99_final_experiment.sh.",
+    )
+    earlier = parser.add_argument_group(
+        "earlier experiments only (not in the paper)",
+        "The final experiment leaves these at their defaults (off).",
+    )
     for config_class in (EAConfig, SimConfig):
         for field in fields(config_class):
             if field.name in {"algorithm", "policy", "seed"}:
                 continue
+            group = earlier if field.name in EARLIER_ONLY else final
             flag = f"--{field.name.replace('_', '-')}"
+            # The formatter adds the default to a note; a bare default needs
+            # a help text of its own to be shown at all.
+            note = EARLIER_ONLY.get(field.name) or NOTES.get(field.name)
+            options: dict[str, object] = {
+                "default": field.default,
+                "help": note or "(default: %(default)s)",
+            }
             if field.name == "body":
-                parser.add_argument(flag, choices=BODIES, default=field.default)
+                options["choices"] = BODIES
             elif field.name == "terrain_mode":
-                parser.add_argument(
-                    flag, choices=("per_run", "per_generation"), default=field.default
-                )
+                options["choices"] = ("per_run", "per_generation")
             elif field.name == "crossover":
-                parser.add_argument(flag, choices=CROSSOVERS, default=field.default)
+                options["choices"] = CROSSOVERS
             elif isinstance(field.default, bool):
                 # --vision / --no-vision; type=bool would read "False" as True.
-                parser.add_argument(
-                    flag, action=argparse.BooleanOptionalAction, default=field.default
-                )
+                options["action"] = argparse.BooleanOptionalAction
             else:
-                parser.add_argument(
-                    flag, type=type(field.default), default=field.default
-                )
+                options["type"] = type(field.default)
+            group.add_argument(flag, **options)
     return parser
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Step 27 (2026-09-30): how sure are we? No new runs: statistics for the
-# research question (experiment 14) and the migration-interval follow-up (26).
+# preliminary study: experiment 14 and the migration-interval follow-up (26).
 #
 # For every pair of conditions, paired by seed: the mean difference with its
 # 95% interval, the probability that one is truly better (Bayesian paired

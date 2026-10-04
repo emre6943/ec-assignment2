@@ -14,7 +14,7 @@ Only the EMIGRANT SELECTION differs between experimental conditions:
 Topology, interval, number of migrants and the replacement policy are held
 fixed across conditions (decision D11 in docs/decisions.md).
 
-Fitness is a distance to the target: LOWER IS BETTER.
+The fitness (`simulate.fitness`) is minimised: LOWER IS BETTER.
 """
 
 # Standard library
@@ -27,19 +27,6 @@ import numpy.typing as npt
 
 type Policy = Literal["best", "worst", "random", "none"]
 POLICIES: tuple[Policy, ...] = ("best", "worst", "random", "none")
-
-
-@dataclass
-class Island:
-    """One sub-population: a genotype matrix (one row per individual) + fitness."""
-
-    genotypes: npt.NDArray[np.float64]
-    fitness: npt.NDArray[np.float64]
-
-    def __post_init__(self) -> None:
-        if len(self.genotypes) != len(self.fitness):
-            msg = f"{len(self.genotypes)} genotypes but {len(self.fitness)} fitness values"
-            raise ValueError(msg)
 
 
 def select_emigrants(
@@ -92,8 +79,10 @@ def plan_migration(
     same event, and immigrants never displace each other. Each island's worst
     `n_migrants` natives are the ones replaced.
 
-    Keeping the plan separate from the move lets the same tested logic drive
-    both the plain-numpy `migrate` below and the ariel.ec operation in the EA.
+    The EA (`ea.Experiment.migrate`) carries the plan out on ariel.ec's
+    individuals: emigrants are copied, not moved, so island sizes stay
+    constant, and immigrants keep their fitness - fair only because every
+    island walks the same terrain in a generation (decision D10).
     """
     if policy == "none" or len(fitness_per_island) < 2:
         return []
@@ -110,30 +99,3 @@ def plan_migration(
         )
         for source, fitness in enumerate(fitness_per_island)
     ]
-
-
-def migrate(
-    islands: list[Island],
-    n_migrants: int,
-    policy: Policy,
-    rng: np.random.Generator,
-) -> None:
-    """Run one migration event on a ring, modifying `islands` in place.
-
-    Emigrants are copied, not moved: the sender keeps its own copy, so island
-    sizes stay constant. Immigrants keep their fitness value; this is only
-    fair because every island is evaluated on the same terrain in a given
-    generation (decision D10).
-    """
-    plan = plan_migration([i.fitness for i in islands], n_migrants, policy, rng)
-    outgoing = [
-        (
-            islands[t.source].genotypes[t.emigrants].copy(),
-            islands[t.source].fitness[t.emigrants].copy(),
-        )
-        for t in plan
-    ]
-    for transfer, (genotypes, fitness) in zip(plan, outgoing, strict=True):
-        target = islands[transfer.target]
-        target.genotypes[transfer.replaced] = genotypes
-        target.fitness[transfer.replaced] = fitness

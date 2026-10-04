@@ -1,7 +1,11 @@
 """Compare conditions across seeds: the figures and numbers for the report.
 
-    uv run --project ../ariel python analyze.py results/best results/worst \\
-        results/random results/none results/random_search
+    uv run --project ../ariel python analyze.py results/final/best \\
+        results/final/worst results/final/random results/final/none \\
+        results/final/standard results/final/random_search \\
+        --reference none --out results/final/analysis
+
+(as `experiments/99_final_experiment.sh` runs it for the paper).
 
 Each argument is a condition folder holding `seed*/` run folders. Writes into
 `--out` (default `results/analysis/`):
@@ -25,17 +29,17 @@ How each number is defined (decision D3):
 - AUC               the mean of best so far over the evaluation budget; lower
                     means good solutions were found earlier
 
-The statistics (decision D3), on the best fitness at the budget and on the AUC:
+The statistics (decision D3), on the best fitness at the budget and on the AUC;
+the paper reports 1 and 3:
 
 1. A Friedman test across all conditions, blocked by seed. Conditions with the
    same seed walk the same terrain, so the runs form matched blocks.
-2. Planned comparisons: every condition against `--reference` (default
-   `none`, the no-migration control) with a two-sided Mann-Whitney U test,
-   Holm-corrected. With 5 seeds per condition the smallest possible
-   Mann-Whitney p is 0.008, so only a few planned comparisons - not all
-   pairs - can ever reach significance after correction.
-3. All pairs, paired by seed (for the final experiment's 20 seeds): every
-   pair of conditions with one two-sided test on the per-seed differences,
+2. Unpaired comparisons, kept from the early 5-seed experiments and not used
+   in the paper: every condition against `--reference` (default `none`, the
+   no-migration control) with a two-sided Mann-Whitney U test,
+   Holm-corrected. They ignore the pairing by seed that 3 uses.
+3. All pairs, paired by seed (the final experiment's 20 seeds): every pair of
+   conditions with one two-sided test on the per-seed differences,
    Holm-corrected across the pairs of each metric. Also on the unseen-terrain
    distance when it is there. The test is chosen per metric by a rule fixed
    before the final experiment's results existed (decision D25): a
@@ -44,8 +48,9 @@ The statistics (decision D3), on the best fitness at the budget and on the AUC:
    with the mean difference, its 95% interval and Cohen's d_z as effect
    sizes; otherwise every pair gets the Wilcoxon signed-rank test, with the
    median difference and the matched-pairs rank-biserial correlation. With
-   n seeds the smallest possible Wilcoxon p is 2 / 2^n: 0.0625 for experiment
-   14's 5, so nothing can be significant there with that test.
+   n seeds the smallest possible Wilcoxon p is 2 / 2^n: 1.9e-6 for 20 seeds,
+   but 0.0625 for the 5 seeds of the earlier experiments, where nothing can
+   be significant with that test.
 """
 
 # Standard library
@@ -148,18 +153,26 @@ class NormalityCheck(NamedTuple):
 
 
 def best_so_far(run: Path) -> pd.DataFrame:
-    """Evaluations and the best fitness / distance found up to each generation."""
+    """Evaluations and the best fitness / distance found up to each generation.
+
+    Also the whole population's genotype `spread` in that generation (the mean
+    distance of the genotypes to their centroid, `ea.stats_row`), where the
+    log has it: a descriptive measure of how alike the islands have become.
+    """
     log = pd.read_csv(run / "log.csv", dtype={"island": str})
     everyone = log[log["island"] == "all"]
     # `best_final` excludes a curriculum's movement reward; older logs lack it.
     column = "best_final" if "best_final" in everyone else "best"
-    return pd.DataFrame(
+    curve = pd.DataFrame(
         {
             "evaluations": everyone["evaluations"].to_numpy(),
             "fitness": everyone[column].cummin().to_numpy(),
             "distance": everyone["best_distance"].cummin().to_numpy(),
         }
     )
+    if "spread" in everyone:
+        curve["spread"] = everyone["spread"].to_numpy()
+    return curve
 
 
 def on_grid(curve: pd.DataFrame, column: str, grid: npt.NDArray) -> npt.NDArray:
@@ -175,17 +188,22 @@ def run_metrics(
     """Best at the budget, evaluations to threshold and AUC for one run.
 
     Everything is read within the common budget (the grid's last point), so a
-    run that happened to go on longer gains nothing from it.
+    run that happened to go on longer gains nothing from it. `final_spread`,
+    the population's genotype spread at the budget, is descriptive only: no
+    test uses it.
     """
     within = curve[curve["evaluations"] <= grid[-1]]
     reached = within.loc[within["fitness"] < threshold, "evaluations"]
     end = grid[-1:]
-    return {
+    metrics = {
         "final_fitness": float(on_grid(curve, "fitness", end)[0]),
         "final_distance": float(on_grid(curve, "distance", end)[0]),
         "evals_to_threshold": float(reached.iloc[0]) if len(reached) else np.nan,
         "auc": float(on_grid(curve, "fitness", grid).mean()),
     }
+    if "spread" in curve:
+        metrics["final_spread"] = float(on_grid(curve, "spread", end)[0])
+    return metrics
 
 
 def holm(p_values: list[float]) -> list[float]:
@@ -226,7 +244,11 @@ def friedman(table: pd.DataFrame, metric: str) -> tuple[float, float, int] | Non
 def planned_comparisons(
     table: pd.DataFrame, metric: str, reference: str
 ) -> list[tuple[str, float, float]]:
-    """Every condition against `reference`: (condition, p, Holm-adjusted p)."""
+    """Every condition against `reference`: (condition, p, Holm-adjusted p).
+
+    Unpaired (Mann-Whitney U), kept from the early experiments; the paper uses
+    the paired tests of `paired_comparisons` instead.
+    """
     others = [c for c in table["condition"].unique() if c != reference]
     base = table.loc[table["condition"] == reference, metric]
     p_values = [
@@ -584,9 +606,16 @@ def stats_report(table: pd.DataFrame, reference: str) -> str:
             lines.append(f"| {metric} | – | – | needs ≥ 3 conditions, ≥ 2 seeds |")
         else:
             statistic, p, blocks = result
-            lines.append(f"| {metric} | {statistic:.2f} | {p:.4f} | {blocks} |")
+            lines.append(f"| {metric} | {statistic:.2f} | {format_p(p)} | {blocks} |")
 
-    lines += ["", f"## Planned comparisons against `{reference}`", ""]
+    lines += [
+        "",
+        (
+            f"## Planned comparisons against `{reference}` "
+            "(unpaired; kept from the early experiments, not used in the paper)"
+        ),
+        "",
+    ]
     if reference not in set(table["condition"]):
         lines.append(f"No condition named `{reference}`; pass `--reference`.")
     else:
@@ -599,10 +628,22 @@ def stats_report(table: pd.DataFrame, reference: str) -> str:
         for metric in TESTED_METRICS:
             for other, p, p_holm in planned_comparisons(table, metric, reference):
                 lines.append(
-                    f"| {metric} | {other} vs {reference} | {p:.4f} | {p_holm:.4f} |"
+                    f"| {metric} | {other} vs {reference} | {format_p(p)} | "
+                    f"{format_p(p_holm)} |"
                 )
     lines += ["", *paired_report(table)]
     return "\n".join(lines) + "\n"
+
+
+def threshold_median(evaluations: pd.Series) -> str:
+    """The median evaluations to the threshold over ALL runs, as text.
+
+    A run that never reached the threshold counts as the slowest, so unlike
+    the mean over the runs that got there, the median does not flatter a
+    condition whose slow runs never arrived. "never" if the median run did not.
+    """
+    median = float(np.median(evaluations.fillna(np.inf)))
+    return f"{median:.0f}" if np.isfinite(median) else "never"
 
 
 def summary_markdown(table: pd.DataFrame, threshold: float, budget: float) -> str:
@@ -617,7 +658,8 @@ def summary_markdown(table: pd.DataFrame, threshold: float, budget: float) -> st
             if column == "evals_to_threshold":
                 cells.append(
                     f"{values.mean():.0f} ± {values.std():.0f} "
-                    f"({len(values)}/{len(group)} reached)"
+                    f"({len(values)}/{len(group)} reached; "
+                    f"median {threshold_median(group[column])})"
                     if len(values)
                     else f"not reached (0/{len(group)})"
                 )
@@ -628,8 +670,11 @@ def summary_markdown(table: pd.DataFrame, threshold: float, budget: float) -> st
         lines.append(f"| {condition} | {len(group)} | " + " | ".join(cells) + " |")
     return (
         f"Mean ± sample standard deviation across seeds. Threshold for 'evals to "
-        f"threshold': fitness < {threshold}. Budget compared: {budget:.0f} "
-        f"evaluations.\n\n" + "\n".join(lines) + "\n"
+        f"threshold': fitness < {threshold}; the mean is over the runs that "
+        f"reached it, the median over all runs (one that never did counts as "
+        f"slowest). Budget compared: {budget:.0f} evaluations.\n\n"
+        + "\n".join(lines)
+        + "\n"
     )
 
 

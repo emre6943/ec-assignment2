@@ -1,25 +1,29 @@
 """One fitness evaluation: let the network walk on the given terrains, measure.
 
-    fitness = distance to the target at the end            (walk there)
-            [ + w x the distance to the target averaged over the walk (fast; D20) ]
-            + 0.5 x fraction of the run the core touches the ground   (stand)
-            + 1.0 x fraction of the run the robot is upside down      (stay upright)
-            [ + w x how low the core is carried, 0 at >= carry_height up (D18) ]
-            [ + w x how much the least-used leg lags the others    (D18) ]
-            [ + w x how much the laziest leg's motors lag the others (D18) ]
-            [ - a fading reward for moving at all, in curriculum runs (D16) ]
+The paper's fitness (Eq. 1), LOWER IS BETTER:
 
-averaged over the terrains the run walks. LOWER IS BETTER. `walk` only measures
-(`Score`); `fitness` turns the measurements into the number the EA minimises.
-The distance term is ARIEL's own `distance_to_target`; the two posture terms
-are ours (decision D15). A spider carries its body on its legs: at rest
-spider_16's core lies on the ground, so it would have to push itself up to
-avoid the ground penalty - which its motors turn out to be too weak for
-(see bodies.py).
+    f = d_T + 0.5 d_mean + 1.0 c + 1.0 l + 1.0 u + 0.5 w
+
+    d_T     distance to the target at the end, ARIEL's `distance_to_target`
+    d_mean  the distance averaged over the whole walk, 0 after arrival (D20)
+    c       share of the walk the core touches the ground (D15)
+    l       how low the core is carried: 0 at >= 4 cm above lying (D18)
+    u       share of the walk the robot is upside down (D15)
+    w       how far the laziest leg's motors fall short of an equal share
+            of the work (D18)
+
+averaged over the terrains the run walks (one in the final experiment). Those
+weights, the 4 cm line and ending the walk on arrival are the flags of
+`experiments/99_final_experiment.sh`; the `SimConfig` defaults are the early
+experiments' values (see its docstring). `fitness` also has terms the paper
+does not use (weight 0 there): how much the least-used leg lags the others
+(D18), and a fading reward for moving at all in curriculum runs (D16).
+`walk` only measures (`Score`); `fitness` turns the measurements into the
+number the EA minimises.
 
 The pieces:
 
-- `build_model`   the body on a fresh `RuggedTerrainWorld()`, spawned above it
+- `build_model`   the body on a new copy of a world, spawned above it
 - `walk`          run one episode with one controller; return its `Score`
 - `evaluate`      average `walk` over several terrains
 - `fitness`       combine a `Score` into the number the EA minimises
@@ -27,9 +31,9 @@ The pieces:
 Terrains are built in the MAIN process and saved to files - once per seed
 (`run_terrains`, the default) or once per generation (`save_terrains`) - and
 loaded by the worker processes (`evaluate_task`). Workers never build a world
-themselves: `RuggedTerrainWorld()` draws a new random terrain on every
-construction, so each worker would otherwise get different ground, and
-individuals would no longer be compared fairly (D10).
+themselves: OlympicArena (like RuggedTerrainWorld) draws a new random rugged
+strip on every construction, so each worker would otherwise get different
+ground, and individuals would no longer be compared fairly (D10).
 """
 
 # Standard library
@@ -72,32 +76,52 @@ FAILED_FITNESS: float = 10.0
 FELL_OUT_OF_WORLD_Z: float = -1.0
 TARGET_RADIUS: float = 0.1  # within this many metres the target counts as reached
 # The core counts as carried once its underside is this far above the ground
-# under it (decision D18). The default is lenient; spider_8 can hold about 6 cm.
+# under it (decision D18). The default is lenient; spider_8 can hold about 6 cm,
+# and the paper uses 4 cm (`--carry-height 0.04`).
 CARRY_HEIGHT: float = 0.02
 
 
 @dataclass(frozen=True)
 class SimConfig:
-    """Everything that defines an evaluation. Identical across all conditions."""
+    """Everything that defines an evaluation. Identical across all conditions.
+
+    The defaults are the settings of the EARLY experiments, not the paper's.
+    They stay as they are because every saved run's config.json is read back
+    against them (`saved_sim_config`), and experiments 14 and 19-26 rely on
+    them. The paper's settings (experiment 99: 16 inputs without vision, a
+    16-8-4-8 network, the fitness of Eq. 1, walks that end on arrival) are the
+    flags in `experiments/99_final_experiment.sh`; a field whose paper value
+    differs from its default says so in a `# paper:` comment.
+    """
 
     duration: float = 15.0  # seconds of simulated time per episode (D12)
     control_every: int = 10  # physics steps per network update (10 x 2 ms = 50 Hz)
-    vision: bool = True  # the terrain-sensing rays as extra inputs
-    vision_rays: str = "all"  # which rays: "all" 10 or the 5 "near" ones (D5)
+    # The terrain-sensing rays as extra inputs.
+    vision: bool = True  # paper: False (D5)
+    # Which rays, with vision on (sensors.RAY_SETS, D5): "all" 10, the 5
+    # "near", the 3 "near3" or the 1 "down".
+    vision_rays: str = "all"
     position: bool = False  # the core's absolute (x, y) as 2 extra inputs (exp. 29)
-    hidden_layers: str = "16"  # neurons per hidden layer, e.g. "16" or "8,8" (D6)
+    # Neurons per hidden layer, e.g. "16" or "8,8".
+    hidden_layers: str = "16"  # paper: "8,4" (D6)
     body: str = DEFAULT_BODY  # a John Set body (bodies.BODIES, decision D1)
     evolve_tempo: bool = False  # a tempo gene sets the clock (genome.py, D17)
-    ground_contact_weight: float = 0.5  # metres-equivalent for lying down all run
+    # Metres-equivalent for lying down all run.
+    ground_contact_weight: float = 0.5  # paper: 1.0 (D18)
     upside_down_weight: float = 1.0  # metres-equivalent for being flipped all run
-    low_body_weight: float = 0.0  # for a core carried below carry_height all run (D18)
-    carry_height: float = CARRY_HEIGHT  # metres of lift that count as carried (D18)
+    # For a core carried below carry_height all run.
+    low_body_weight: float = 0.0  # paper: 1.0 (D18)
+    # Metres of lift that count as carried.
+    carry_height: float = CARRY_HEIGHT  # paper: 0.04 (D18)
     leg_imbalance_weight: float = 0.0  # for one leg never moving (D18)
-    work_imbalance_weight: float = 0.0  # for one leg's motors never working (D18)
-    speed_weight: float = 0.0  # x the walk's average distance to the target (D20)
+    # For one leg's motors never working.
+    work_imbalance_weight: float = 0.0  # paper: 0.5 (D18)
+    # x the walk's average distance to the target.
+    speed_weight: float = 0.0  # paper: 0.5 (D20)
 
     # Ending a walk early (decision D16); all off by default.
-    stop_at_target: bool = False  # end the walk once the target is reached
+    # End the walk once the target is reached.
+    stop_at_target: bool = False  # paper: True (D20)
     early_stop_time: float = 5.0  # when a hopeless walk is judged (if enabled)
 
     def __post_init__(self) -> None:
@@ -229,15 +253,20 @@ def final_sim_config(run: Path) -> SimConfig:
 
 
 def fitness(score: Score, config: SimConfig, movement_weight: float = 0.0) -> float:
-    """The number the EA minimises (decision D15, and D16 for `movement_weight`).
+    """The number the EA minimises (decisions D15, D18, D20; D16 for `movement_weight`).
 
         distance + ground_contact_weight x ground_contact
                  + upside_down_weight x upside_down
+                 + low_body_weight x low_body
+                 + leg_imbalance_weight x leg_imbalance
+                 + work_imbalance_weight x work_imbalance
+                 + speed_weight x mean_distance
                  - movement_weight x displacement
 
-    `movement_weight` is 0 except early in a curriculum run, where it rewards
-    moving at all - in any direction - before walking towards the target
-    matters (`ea.EAConfig.curriculum`).
+    With the paper's weights (1.0, 1.0, 1.0, 0, 0.5, 0.5) this is its Eq. 1
+    (see the module docstring). `movement_weight` is 0 except early in a
+    curriculum run, where it rewards moving at all - in any direction - before
+    walking towards the target matters (`ea.EAConfig.curriculum`).
     """
     return (
         score.distance
@@ -507,13 +536,14 @@ def run_terrains(
 ) -> tuple[str, ...]:
     """The terrains one seed uses for its whole run, generated on first use.
 
-    Each is a plain `RuggedTerrainWorld()` (a random terrain) compiled once
-    and saved as `terrain<i>.mjb` in `directory`, or `terrain<i>_yaw<d>.mjb`
-    when the robot starts turned by d degrees on it (`terrain_yaw`, D23), with
-    `_arielspawn` added for ARIEL's own spawn (D2a): the saved model includes
-    the spawned robot. Every later run pointed at
-    the same directory - the other migration policies with the same seed -
-    reuses the saved files, so all conditions walk exactly the same ground.
+    Each is a new copy of the run's world (`world_factory`; on OlympicArena a
+    new random rugged strip), compiled once and saved as `terrain<i>.mjb` in
+    `directory`, or `terrain<i>_yaw<d>.mjb` when the robot starts turned by d
+    degrees on it (`terrain_yaw`, D23), with `_arielspawn` added for ARIEL's
+    own spawn (D2a): the saved model includes the spawned robot. Every later
+    run pointed at the same directory - the other migration policies with the
+    same seed - reuses the saved files, so all conditions walk exactly the
+    same ground.
     Two runs starting at the same moment must not end up on different
     terrain: each writes its candidate under a private name and publishes it
     with `os.link`, which fails if the file already exists. The loser deletes

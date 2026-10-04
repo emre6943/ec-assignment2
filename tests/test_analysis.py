@@ -27,6 +27,7 @@ from analyze import (
     signed_rank_p,
     stats_report,
     summary_markdown,
+    threshold_median,
 )
 from compute_ledger import EXPERIMENTS, run_tally
 from longer_walks import arrival
@@ -63,6 +64,20 @@ def test_run_metrics_reads_within_the_budget() -> None:
 def test_threshold_never_reached_is_nan() -> None:
     metrics = run_metrics(CURVE, np.linspace(0, 320, 5), threshold=1.0)
     assert np.isnan(metrics["evals_to_threshold"])
+
+
+def test_final_spread_is_read_at_the_budget_when_logged() -> None:
+    grid = np.linspace(0, 240, 4)
+    assert "final_spread" not in run_metrics(CURVE, grid, threshold=1.6)
+    curve = CURVE.assign(spread=[7.0, 5.0, 3.0, 2.0])
+    assert run_metrics(curve, grid, threshold=1.6)["final_spread"] == 3.0
+
+
+def test_threshold_median_counts_runs_that_never_got_there_as_slowest() -> None:
+    # the mean over the two that arrived would be 150; the median of all four
+    # is between 200 and "never", so never
+    assert threshold_median(pd.Series([100.0, 200.0, np.nan, np.nan])) == "never"
+    assert threshold_median(pd.Series([100.0, 200.0, 300.0, np.nan])) == "250"
 
 
 def make_table(effect: float) -> pd.DataFrame:

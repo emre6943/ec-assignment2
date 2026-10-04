@@ -59,4 +59,3 @@ done
 # The position conditions among themselves, as experiment 14 did.
 uv run --project ../ariel python analyze.py "${conditions[@]/#/$out/pos_}" \
     --reference pos_none --out "$out/analysis_position"
-uv run --project ../ariel python compute_ledger.py

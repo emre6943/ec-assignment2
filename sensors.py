@@ -1,20 +1,20 @@
 """What the controller network is told about the world (decision D5).
 
-The input vector - 34 values for spider_16, each scaled to roughly [-1, 1]:
+The paper's input vector - 16 values for spider_8 without vision, each scaled
+to roughly [-1, 1]:
 
-    hinge angles     one per hinge (16 for spider_16): where each joint is now
-    clock                2   sin/cos of a beat to drive rhythmic gaits
-                             (1 Hz, or an evolved tempo: genome.py)
+    hinge angles         8   one per hinge: where each joint is now
+    clock                2   sin/cos of a 1 Hz beat to drive rhythmic gaits
     target               3   distance, sin(bearing), cos(bearing) in the
                              robot's own frame - "where is the goal from here"
-    gravity              3   the world's up-direction seen from the core -
+    gravity (tilt)       3   the world's up-direction seen from the core -
                              how the body is tilted on the rough ground
-    vision              10   distance to whatever each of 10 rays hits -
-                             the ground ahead and below on every side, and
-                             (via the upward ray) whether the robot has flipped
 
-Vision can be switched off (`SimConfig.vision`), which leaves 24 inputs for
-spider_16. Other bodies (`SimConfig.body`) have a different number of hinges.
+Options that only earlier experiments used: vision (`SimConfig.vision`, on by
+default; off since experiment 23), up to 10 more inputs, the distance to the
+ground along each of 10 rays (`RAYS`, `RAY_SETS`); an evolved clock tempo
+(genome.py, D17); and other bodies (`SimConfig.body`), which have a different
+number of hinges (spider_16, the body of experiments 1-12, has 16).
 
 The robot's absolute position is NOT an input by default: the target vector
 carries the useful part of it in a form that means the same everywhere.

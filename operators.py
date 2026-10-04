@@ -1,7 +1,8 @@
 """Variation and selection operators on flat genotypes.
 
 Every function takes an explicit `np.random.Generator`, so a run is fully
-determined by its seed. Fitness is a distance to the target: LOWER IS BETTER.
+determined by its seed. The fitness (`simulate.fitness`) is minimised: LOWER IS
+BETTER.
 
 - `neuron_crossover`    decision D7
 - `weight_crossover`, `blx_crossover`   alternatives tested in experiment 25

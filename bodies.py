@@ -29,6 +29,9 @@ from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots import john_set
 from ariel.simulation.environments import SimpleFlatWorld
 
+# Local libraries
+from sensors import CORE_BODY
+
 BODIES: tuple[str, ...] = (
     "baby_a",
     "baby_b",
@@ -48,7 +51,6 @@ DEFAULT_BODY: str = "spider_8"  # the final body (decision D1, since 2026-09-29)
 # The body of experiments 1-12. Its saved terrains keep their original folders
 # (results/terrains/<world>/seed<S>/); every other body gets a subfolder.
 FIRST_BODY: str = "spider_16"
-CORE_BODY: str = "robot1_core"  # the core's name after world.spawn() prefixes it
 
 
 @dataclass(frozen=True)

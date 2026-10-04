@@ -6,10 +6,10 @@
 
 The pre-registered tests of experiment 99 (D3, D25; `analyze.py`) cover the
 final fitness, the AUC and the unseen distance, so they mix speed and outcome.
-This script looks only at where the runs END, with reaching the target first,
-as Emre asked after seeing the results. It is therefore exploratory: the
-measures were chosen after the results were known, and a reader should weigh
-its p-values accordingly (D26). Random search is left out: it never reaches
+This script looks only at where the runs END, with reaching the target first;
+it was added after the results were known (D26). It is therefore exploratory:
+the measures were chosen after seeing the results, and a reader should weigh
+its p-values accordingly. Random search is left out: it never reaches
 the target and is far behind on every measure (`analyze.py`).
 
 Per run (one per seed), from files the experiment already wrote:
@@ -27,8 +27,11 @@ Per run (one per seed), from files the experiment already wrote:
 The distance left after 30 s is not used: a walk whose robot falls off the
 arena is scored as 10 m away (`simulate.FAILED_SCORE`), and in 30 s many
 brains walk on past the strip and fall, so that mean mostly counts falls. The
-unseen fitness charges a fall too (fitness 18.5), but falls within 15 s are rare
-(4 of 2,000 walks of the five EAs).
+unseen fitness charges a fall too: FAILED_SCORE has d_T = 10 m, a mean
+distance of 10 m and every penalty at its worst (1), so the paper's fitness
+gives 10 + 0.5 x 10 + 1.0 (ground) + 1.0 (low core) + 1.0 (upside down)
++ 0.5 x 1 (work imbalance) = 18.5. Falls within 15 s are rare (4 of 2,000
+walks of the five EAs).
 
 Tests, all paired by seed and Holm-corrected across the 10 pairs of the five
 EAs: the yes/no measures get Cochran's Q (do the arrival rates differ at all?)

@@ -1,7 +1,8 @@
 """Test each run's best network on terrain it never saw (decision D14).
 
-    uv run --project ../ariel python unseen.py results/best/seed0 results/none/seed0 ...
-    uv run --project ../ariel python unseen.py results/best/seed0 --yaws 0 30 -30 --duration 20
+    uv run --project ../ariel python unseen.py results/final/best/seed10 ...
+    uv run --project ../ariel python unseen.py RUN --duration 30
+    uv run --project ../ariel python unseen.py RUN --yaws 0 30 -30 --duration 20
 
 Every run evolves on its seed's training terrain. This asks the robustness
 question: does the evolved brain still walk on new ground? For each world and
@@ -12,10 +13,11 @@ world (a new random terrain, or a new rugged strip for OlympicArena) into
 of a body and world are tested on exactly the same unseen ground. Runs on
 SimpleFlatWorld are skipped: it is the same on every build.
 
-`--yaws` also starts the robot turned away from the target (decision D23):
-each turn gets its own `N_TEST_TERRAINS` test arenas, so `--yaws 0 30 -30`
-means 60 unseen walks. `--duration` overrides the walk length, so brains
-trained with different walk lengths can be tested on the same one.
+`--duration` overrides the walk length, so brains trained with different walk
+lengths can be tested on the same one; the final experiment also tests at
+30 s. `--yaws` (experiment 21 only, not in the paper) also starts the robot
+turned away from the target (decision D23): each turn gets its own
+`N_TEST_TERRAINS` test arenas, so `--yaws 0 30 -30` means 60 unseen walks.
 
 For each run it writes `unseen.json` next to the run's other files, or, with
 `--yaws` or `--duration`, a file named after them (`unseen_yaws0_30_20s.json`),
@@ -113,14 +115,18 @@ def main() -> None:
     parser.add_argument("runs", type=Path, nargs="+", help="run folders (…/seedN)")
     parser.add_argument("--workers", type=int, default=10)
     parser.add_argument(
+        "--duration",
+        type=float,
+        help="seconds to walk (default: the run's walks; the paper also uses 30)",
+    )
+    earlier = parser.add_argument_group("earlier experiments only (not in the paper)")
+    earlier.add_argument(
         "--yaws",
         type=float,
         nargs="+",
         default=[0.0],
-        help="degrees the robot starts turned by; each gets its own test arenas",
-    )
-    parser.add_argument(
-        "--duration", type=float, help="seconds to walk (default: the run's walks)"
+        help="degrees the robot starts turned by; each gets its own test arenas "
+        "(experiment 21, D23)",
     )
     args = parser.parse_args()
     if args.duration is not None and args.duration <= 0:

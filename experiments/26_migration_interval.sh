@@ -41,4 +41,3 @@ done
 uv run --project ../ariel python unseen.py "${runs[@]}" > "$out/interval_unseen.log" 2>&1
 uv run --project ../ariel python analyze.py "$out"/{best_int5,best,best_int20,best_int50,none} \
     --reference best --out "$out/analysis_interval"
-uv run --project ../ariel python compute_ledger.py

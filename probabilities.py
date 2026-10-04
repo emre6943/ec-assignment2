@@ -1,7 +1,10 @@
 """How sure are we that one condition beats another? Numbers for the report (D3).
 
-    uv run --project ../ariel python probabilities.py results/olympic/best \\
-        results/olympic/worst ... --out results/olympic/probabilities.md
+    uv run --project ../ariel python probabilities.py results/final/best \\
+        results/final/worst ... --out results/final/probabilities.md
+
+(the final experiment's six condition folders, as
+`experiments/99_final_experiment.sh` runs it for the paper).
 
 Each argument is a condition folder holding `seed*/` run folders. For three
 metrics - the best fitness at the common budget, the area under the curve
@@ -13,12 +16,16 @@ unseen arenas (when `unseen.py` has run) - it reports:
   arena in every condition, D10):
     - the mean difference A - B with its 95% interval;
     - P(A better): the probability that A's true mean is lower than B's, from
-      a Bayesian paired t-test with a flat prior. The posterior of the mean
-      difference is then a Student t with n - 1 degrees of freedom, centred
-      on the observed mean difference with its standard error as the scale
-      (Benavoli et al. 2017). It is split three ways, with a region of
-      practical equivalence of +-`--rope`: A better, practically equal, B
-      better;
+      a Bayesian paired t-test with the non-informative prior (constant in
+      the mean, proportional to 1/sigma in the spread). The posterior of the
+      mean difference is then a Student t with n - 1 degrees of freedom,
+      centred on the observed mean difference with its standard error as the
+      scale (Benavoli et al. 2017). Under this prior P(A better) equals one
+      minus the p-value of the one-sided paired t-test of "A's mean is
+      lower" (checked on the final experiment's pairs). The probability
+      matrix reports this "better at all", which ignores the ROPE; the pair
+      table splits it three ways, with a region of practical equivalence
+      (ROPE) of +-`--rope`: A better, practically equal, B better;
     - A12 (Vargha & Delaney 2000): the chance that a random run of A beats a
       random run of B, ignoring the pairing;
     - the seeds A won out of n.
@@ -98,7 +105,11 @@ def mean_interval(values: npt.NDArray) -> tuple[float, float, float, float]:
 
 def paired_posterior(differences: npt.NDArray, rope: float) -> dict[str, float]:
     """Bayesian paired t-test on A - B (lower is better): the posterior of the
-    mean difference is Student t(n - 1, mean, sd / sqrt(n)) under a flat prior.
+    mean difference is Student t(n - 1, mean, sd / sqrt(n)) under the
+    non-informative prior (proportional to 1/sigma).
+
+    `p_a_better_at_all` (P(mean < 0), no ROPE) equals one minus the p-value of
+    the one-sided paired t-test with the alternative "A's mean is lower".
     """
     n = len(differences)
     mean = float(differences.mean())
@@ -171,11 +182,13 @@ def report(table: pd.DataFrame, pairs: pd.DataFrame, rope: float) -> str:
         "# How sure are we?",
         "",
         "Written by `probabilities.py`. Lower is better for every metric. Seeds are",
-        "paired (same arena in every condition). P(A better) comes from a Bayesian paired",
-        "t-test with a flat prior (Benavoli et al. 2017); 'practically equal' means the",
-        f"mean difference lies within ±{rope:g}. A12 is the chance that a random run of A",
-        "beats a random run of B (Vargha & Delaney 2000). The probabilities are per pair",
-        "and not corrected for the number of pairs.",
+        "paired (same arena in every condition). P(A better) comes from a Bayesian",
+        "paired t-test with a non-informative prior (Benavoli et al. 2017). The",
+        "matrices give it with no region of practical equivalence; in the pair",
+        "tables, 'practically equal' means the mean difference lies within",
+        f"±{rope:g}. A12 is the chance that a random run of A beats a random run of",
+        "B (Vargha & Delaney 2000). The probabilities are per pair and not",
+        "corrected for the number of pairs.",
     ]
     conditions = list(dict.fromkeys(table["condition"]))
     for metric, title in METRICS.items():

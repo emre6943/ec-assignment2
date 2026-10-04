@@ -8,28 +8,38 @@ Writes a vector PDF and a PNG preview of each figure into `--out` (default
 `report/figures/`). Every figure but one shows the final experiment, 99: the
 six condition folders in `--final` (default `results/final/`). The interval
 figure shows experiment 26, from `--olympic` (default `results/olympic/`),
-since 99 migrates at one interval only:
+since 99 migrates at one interval only. The figures, by their number and
+label in `report/main.tex`:
 
-    convergence     best fitness and closest distance so far against
-                    generations: mean ± standard deviation over the seeds of
-                    every condition (the line plot the spec asks for)
-    final_spread    every seed's final fitness and unseen-arena distance for
-                    each EA: a box (median and quartiles) and a dot per seed
-    probabilities   P(row converges faster than column): the Bayesian paired
-                    t-test on the AUC (`probabilities.py`)
-    fitness_terms   what each fitness term contributes to the champions'
-                    fitness, from the champion's walk on its own arena in
-                    `unseen.json`
-    longer_walks    trained on 15 s walks: the brains that reach the target on
-                    their own arena with more time, and on 20 unseen arenas
-    interval        experiment 26: final fitness and unseen-arena distance per
-                    seed for each migration interval of the best policy, and
-                    how often every island holds the same champion
+    Figure 2, fig:interval -> interval.pdf
+        experiment 26 (the preliminary study, Section 4.1): final fitness and
+        unseen-arena distance per seed for each migration interval of the
+        best policy, and how often every island holds the same champion.
+    Figure 3, fig:convergence -> convergence.pdf (full text width)
+        (a) best fitness so far against generations (top axis: evaluations),
+            mean ± standard deviation over the seeds of every condition: the
+            line plot the spec asks for.
+        (b) the research question's paired comparison: each EA's best fitness
+            so far minus that of no migration on the same seed, mean over the
+            seeds with a 95% t-interval, on the evaluation grid of the AUC
+            (`analyze.py`), so its mean over the run is the AUC difference.
+            Random search, about 1 above, is left out.
+    Figure 4, fig:spread -> final_spread.pdf
+        every seed's final fitness and unseen-arena distance for each EA: a
+        box (median and quartiles) and a dot per seed.
+    (not in the paper) fitness_terms.pdf
+        the champions' fitness split into the weighted terms of the paper's
+        Equation 1, from each champion's walk on its own arena in
+        `unseen.json`. The paper has no room for it; its Limitations quote
+        the gait terms' sum (0.18-0.20, column `gait`) that this script prints.
+
+Figure 1 (fig:walk), the walking robot (`walk_filmstrip.png`), is drawn by
+`filmstrip.py`, since it walks a robot rather than reading results.
 
 A figure is skipped, with a message, while its inputs are missing: a condition
-without runs, or a run without the `unseen.py`, `longer_walks.py` or
-`summary.json` output that figure reads. `--final results/olympic` draws the
-same figures from experiment 14, which has the same folder layout.
+without runs, or a run without the `unseen.py` or `summary.json` output that
+figure reads. `--final results/olympic` draws the same figures from experiment
+14, which has the same folder layout.
 
 Every condition makes 80 evaluations in generation 0 and 72 children per
 generation after it (4 islands x 18, or 1 x 72 for the standard EA; random
@@ -51,12 +61,17 @@ import numpy.typing as npt
 import pandas as pd
 
 # Local libraries
-from analyze import CONDITION_COLOURS, best_so_far, on_grid, warn_about_short_runs
+from analyze import (
+    CONDITION_COLOURS,
+    GRID_POINTS,
+    best_so_far,
+    on_grid,
+    warn_about_short_runs,
+)
 from ea import LOG_ROUNDING
-from longer_walks import LONG_TEST
-from probabilities import DEFAULT_ROPE, mean_interval, pair_rows, run_table, runs_of
-from rq_figure import CONDITIONS, DIVERGING, EAS, label
-from simulate import TARGET_RADIUS, Score, SimConfig, saved_sim_config
+from probabilities import mean_interval, run_table, runs_of
+from rq_figure import CONDITIONS, EAS, label
+from simulate import Score, SimConfig, saved_sim_config
 
 ROOT = Path(__file__).parent
 FINAL = ROOT / "results" / "final"  # experiment 99
@@ -79,31 +94,42 @@ INTERVALS = {
     "best_int50": ("50", "#184f96"),
     "none": ("off", CONDITION_COLOURS["none"]),
 }
-LONG_WALKS = ("15", "20", "30", "60")  # seconds, as `longer_walks.json` keys them
+# Panel (b) of the convergence figure: each EA against no migration. Random
+# search, about 1 behind, would flatten the EAs' curves into one line at 0.
+REFERENCE = "none"
+COMPARED = tuple(c for c in EAS if c != REFERENCE)
+# Light enough for overlapping bands to keep the means apart: 6 SD bands in
+# panel (a), 4 narrower confidence bands in (b).
+BAND_ALPHA = {"spread": 0.07, "gap": 0.1}
 
-# The fitness terms (D15-D20) in stacking order: what the walk achieved, then
-# the gait terms. Weights come from each run's config; leg imbalance is 0 and
-# no champion is ever upside down, so those two are left out of the figure.
-# The colours of the five drawn, in this order, pass the palette validator's
-# adjacent-pair checks.
+# The fitness terms in the order of the paper's Equation 1, as the paper names
+# them; `{w}` takes the term's weight from the runs' config ("" for 1), `{v}`
+# the plain number. The weights are settings (`TERM_WEIGHTS`): a term whose
+# weight is 0 is not part of the fitness and is left out (leg imbalance, D18).
+# The colours of Equation 1's six terms, in this order, pass every check of the
+# palette validator (dataviz skill), the adjacent-pair ones included; the dark
+# green of c also keeps its thin segment visible between two light ones.
 TERMS = {
-    "distance": ("distance", "#4a3aa7"),
-    "mean_distance": ("mean distance", "#1baf7a"),
-    "low_body": ("low body", "#eda100"),
-    "ground_contact": ("on the ground", "#e34948"),
-    "upside_down": ("upside down", "#e87ba4"),
-    "work_imbalance": ("work imbalance", "#2a78d6"),
-    "leg_imbalance": ("leg imbalance", "#008300"),
+    "distance": ("final distance $d_T$", "#4a3aa7"),
+    "mean_distance": (r"mean distance ${w}\bar{{d}}$ (speed)", "#1baf7a"),
+    "ground_contact": ("core on ground ${w}c$", "#008300"),
+    "low_body": (r"low core ${w}\ell$", "#eda100"),
+    "upside_down": ("upside down ${w}u$", "#e34948"),
+    "work_imbalance": ("leg-work imbalance ${w}w$", "#2a78d6"),
+    "leg_imbalance": ("leg-movement imbalance (weight {v})", "#e87ba4"),  # not in Eq. 1
 }
 TERM_WEIGHTS = {
     "distance": None,  # weight 1, not a setting
     "mean_distance": "speed_weight",
-    "low_body": "low_body_weight",
     "ground_contact": "ground_contact_weight",
+    "low_body": "low_body_weight",
     "upside_down": "upside_down_weight",
     "work_imbalance": "work_imbalance_weight",
     "leg_imbalance": "leg_imbalance_weight",
 }
+# A term whose largest mean is below this share of the longest bar is too
+# thin to see; its legend entry lists the value instead.
+THIN_SEGMENT = 0.025
 
 mpl.rcParams.update(
     {
@@ -155,7 +181,10 @@ def panel(axis: plt.Axes, letter: str, x: float = -0.16) -> None:
 def save(figure: plt.Figure, name: str, out: Path) -> None:
     """The figure as a vector PDF and a PNG preview."""
     out.mkdir(parents=True, exist_ok=True)
-    figure.savefig(out / f"{name}.pdf", facecolor="white")
+    # No creation date: the same data gives the same file, so git sees no change.
+    figure.savefig(
+        out / f"{name}.pdf", facecolor="white", metadata={"CreationDate": None}
+    )
     figure.savefig(out / f"{name}.png", dpi=300, facecolor="white")
     plt.close(figure)
     print(f"written {out / name}.pdf")
@@ -246,10 +275,10 @@ def champion(run: Path) -> tuple[float, Score]:
     """The run's best fitness and the Score it was computed from.
 
     Read from `unseen.json`, where `unseen.py` walked the run's best network
-    on its own arena again. A walk on a saved arena is deterministic (D10),
-    so it repeats the champion's evaluation exactly: for all 30 runs of
-    experiment 14 it matches the champion's record in `database.db` to the
-    last digit. Unlike the database, it is small enough to share, and it is
+    on its own arena again. A walk on a saved arena is deterministic (D10)
+    on the same kind of processor as the run, so it repeats the champion's
+    evaluation exactly: for all 30 runs of experiment 14 it matches the
+    champion's record in `database.db` to the last digit. Unlike the database, it is small enough to share, and it is
     complete for a resumed run (D24), whose champion may sit in an older
     `database_part<N>.db`. Raises ValueError unless the run walked one arena
     and the walk scored the run's best fitness (`summary.json`; after a
@@ -268,66 +297,158 @@ def champion(run: Path) -> tuple[float, Score]:
     return fitness, Score(**{k: parts[k] for k in Score.__dataclass_fields__})
 
 
+def auc_grid(curves: dict[str, dict[str, pd.DataFrame]]) -> npt.NDArray:
+    """The evaluation counts at which `analyze.py` reads the AUC.
+
+    `GRID_POINTS` evenly spaced counts from 0 to the end of the shortest run
+    (`analyze.main`, `probabilities.run_table`), so a run's AUC is the mean of
+    its best-so-far fitness at these counts (`analyze.run_metrics`).
+    """
+    budget = min(
+        curve["evaluations"].iloc[-1]
+        for runs in curves.values()
+        for curve in runs.values()
+    )
+    return np.linspace(0, budget, GRID_POINTS)
+
+
+def paired_gaps(
+    runs: dict[str, pd.DataFrame],
+    reference: dict[str, pd.DataFrame],
+    grid: npt.NDArray,
+) -> npt.NDArray:
+    """Per seed, the best fitness so far minus the reference's on that seed.
+
+    `runs` and `reference` map seed folder names to `best_so_far` curves. One
+    row per seed, one column per grid point; negative is ahead of the
+    reference. Raises ValueError unless both have the same seeds, since the
+    comparison is paired by seed (the same arena, D10).
+    """
+    if set(runs) != set(reference):
+        msg = f"seeds differ: {sorted(set(runs) ^ set(reference))}"
+        raise ValueError(msg)
+    return np.array(
+        [
+            on_grid(runs[seed], "fitness", grid)
+            - on_grid(reference[seed], "fitness", grid)
+            for seed in sorted(runs)
+        ]
+    )
+
+
+def evaluations_axis(axis: plt.Axes, evaluations: npt.NDArray) -> None:
+    """A top axis in evaluations over a bottom axis in generations."""
+    first, step = evaluations[0], evaluations[1] - evaluations[0]
+    top = axis.secondary_xaxis(
+        "top",
+        functions=(lambda g: first + step * g, lambda e: (e - first) / step),
+    )
+    top.set_xticks([0, 3000, 6000, 9000, 12000])
+    top.set_xticklabels(["0", "3k", "6k", "9k", "12k"])
+    top.tick_params(colors=MUTED, labelcolor=MUTED, labelsize=6)
+    top.spines["top"].set_color(MUTED)
+    top.set_xlabel("evaluations", color=MUTED, fontsize=6.5, labelpad=2)
+
+
 def convergence(final: Path, out: Path) -> None:
-    """Best fitness and closest distance so far, mean ± std over seeds."""
+    """(a) Best fitness so far, mean ± std over seeds, for every condition.
+
+    (b) Each EA's best fitness so far minus no migration's on the same seed,
+    mean over seeds with its 95% t-interval, on the AUC's evaluation grid:
+    its mean over the run is the condition's mean AUC difference from no
+    migration, which is checked against `probabilities.run_table`'s AUC.
+    """
     folders = [final / condition for condition in CONDITIONS]
     if missing_inputs("convergence", folders):
         return
     generations, evaluations = common_generations(folders)
-    curves = {f.name: [best_so_far(run) for run in runs_of(f)] for f in folders}
-    figure, axes = plt.subplots(1, 2, figsize=(TEXT_WIDTH, 2.35))
-    measures = (
-        ("fitness", "best fitness so far"),
-        ("distance", "closest to the target so far (m)"),
+    curves = {
+        folder.name: {run.name: best_so_far(run) for run in runs_of(folder)}
+        for folder in folders
+    }
+    figure, (spread_axis, gap_axis) = plt.subplots(1, 2, figsize=(TEXT_WIDTH, 2.35))
+
+    means = {}
+    for condition in CONDITIONS:
+        values = np.array(
+            [on_grid(c, "fitness", evaluations) for c in curves[condition].values()]
+        )
+        mean, std = values.mean(axis=0), values.std(axis=0, ddof=1)
+        means[condition] = mean
+        spread_axis.fill_between(
+            generations,
+            mean - std,
+            mean + std,
+            color=CONDITION_COLOURS[condition],
+            alpha=BAND_ALPHA["spread"],
+            lw=0,
+        )
+    for condition in CONDITIONS:  # every mean on top of every band
+        spread_axis.plot(
+            generations,
+            means[condition],
+            color=CONDITION_COLOURS[condition],
+            linewidth=1.1,
+            linestyle=(0, (4, 2)) if condition == "random_search" else "-",
+            label=label(condition),
+        )
+    spread_axis.set_ylim(bottom=0)
+    spread_axis.set_ylabel("best fitness so far")
+
+    grid = auc_grid(curves)
+    # The AUC grid in generations, for the shared x axis. Its first point, 0
+    # evaluations, holds generation 0's value and falls left of the axis.
+    grid_generations = (grid - evaluations[0]) / (evaluations[1] - evaluations[0])
+    auc = run_table(folders).set_index(["condition", "seed"])["auc"]
+    gaps = {}
+    for condition in COMPARED:
+        gaps[condition] = paired_gaps(curves[condition], curves[REFERENCE], grid)
+        expected = (auc[condition] - auc[REFERENCE]).mean()
+        if not np.isclose(gaps[condition].mean(), expected, atol=1e-9):
+            msg = (
+                f"{condition}: the mean gap {gaps[condition].mean()} is not the "
+                f"AUC difference {expected}"
+            )
+            raise ValueError(msg)
+        bounds = np.array([mean_interval(column)[2:] for column in gaps[condition].T])
+        gap_axis.fill_between(
+            grid_generations,
+            bounds[:, 0],
+            bounds[:, 1],
+            color=CONDITION_COLOURS[condition],
+            alpha=BAND_ALPHA["gap"],
+            lw=0,
+        )
+    for condition in COMPARED:
+        gap_axis.plot(
+            grid_generations,
+            gaps[condition].mean(axis=0),
+            color=CONDITION_COLOURS[condition],
+            linewidth=1.1,
+        )
+    gap_axis.axhline(0, color=CONDITION_COLOURS[REFERENCE], linewidth=1.1, zorder=1)
+    gap_axis.set_ylabel(f"best fitness so far minus\n{label(REFERENCE)} (same seed)")
+    gap_axis.text(
+        0.99,
+        0.98,
+        "below 0: ahead of no migration\nrandom search (about +1) not shown",
+        transform=gap_axis.transAxes,
+        ha="right",
+        va="top",
+        fontsize=6,
+        color=MUTED,
     )
-    for axis, (column, ylabel) in zip(axes, measures, strict=True):
-        for condition in CONDITIONS:
-            values = np.array(
-                [on_grid(c, column, evaluations) for c in curves[condition]]
-            )
-            mean, std = values.mean(axis=0), values.std(axis=0, ddof=1)
-            colour = CONDITION_COLOURS[condition]
-            axis.fill_between(
-                generations, mean - std, mean + std, color=colour, alpha=0.13, lw=0
-            )
-            axis.plot(
-                generations,
-                mean,
-                color=colour,
-                linewidth=1.1,
-                linestyle=(0, (4, 2)) if condition == "random_search" else "-",
-                label=f"{label(condition)}",
-            )
+    differences = ", ".join(f"{c} {gaps[c].mean():+.3f}" for c in COMPARED)
+    print(f"convergence (b): mean over the run = AUC minus no migration: {differences}")
+
+    for axis in (spread_axis, gap_axis):
         print_axis(axis)
         axis.set_xlim(0, generations[-1])
-        axis.set_ylim(bottom=0)
         axis.set_xlabel("generation")
-        axis.set_ylabel(ylabel)
-        top = axis.secondary_xaxis(
-            "top",
-            functions=(
-                lambda g: evaluations[0] + (evaluations[1] - evaluations[0]) * g,
-                lambda e: (e - evaluations[0]) / (evaluations[1] - evaluations[0]),
-            ),
-        )
-        top.set_xticks([0, 3000, 6000, 9000, 12000])
-        top.set_xticklabels(["0", "3k", "6k", "9k", "12k"])
-        top.tick_params(colors=MUTED, labelcolor=MUTED, labelsize=6)
-        top.spines["top"].set_color(MUTED)
-        top.set_xlabel("evaluations", color=MUTED, fontsize=6.5, labelpad=2)
-    axes[1].axhline(TARGET_RADIUS, color=INK, linewidth=0.7, linestyle=(0, (2, 2)))
-    axes[1].text(
-        generations[-1],
-        TARGET_RADIUS + 0.03,
-        f"target reached (< {TARGET_RADIUS:g} m)",
-        ha="right",
-        va="bottom",
-        fontsize=6,
-        color=INK,
-    )
-    panel(axes[0], "a", x=-0.12)
-    panel(axes[1], "b", x=-0.12)
-    handles, labels = axes[0].get_legend_handles_labels()
+        evaluations_axis(axis, evaluations)
+    panel(spread_axis, "a", x=-0.12)
+    panel(gap_axis, "b", x=-0.12)
+    handles, labels = spread_axis.get_legend_handles_labels()
     figure.legend(
         handles,
         labels,
@@ -345,8 +466,8 @@ def convergence(final: Path, out: Path) -> None:
 def final_spread(final: Path, out: Path) -> None:
     """Every seed's final fitness and unseen distance: a box per EA, dots on top.
 
-    Random search is left out, as in the probabilities figure: far behind
-    every EA, it would squash their boxes into a corner.
+    Random search is left out: far behind every EA, it would squash their
+    boxes into a corner.
     """
     folders = [final / condition for condition in EAS]
     if missing_inputs("final_spread", folders, ("unseen.json",)):
@@ -494,124 +615,50 @@ def interval(olympic: Path, out: Path) -> None:
     save(figure, "interval", out)
 
 
-def reach_shares(runs: list[Path]) -> dict[str, tuple[float, float]]:
-    """Own arena (brains of the runs) and unseen (% of walks) reaching the target,
-    at the training length and at LONG_TEST seconds."""
-    long_key = f"{LONG_TEST:g}"
-    own = [
-        sum(
-            json.loads((run / "longer_walks.json").read_text())[key]["arrived_at"]
-            is not None
-            for run in runs
-        )
-        for key in ("15", long_key)
-    ]
-    unseen = []
-    for name in ("unseen.json", f"unseen_{long_key}s.json"):
-        values = [
-            json.loads((run / name).read_text())["unseen"]["reached"]
-            for run in runs
-            if (run / name).exists()
-        ]
-        unseen.append(100 * float(np.mean(values)))
-    return {"own": (own[0], own[1]), "unseen": (unseen[0], unseen[1])}
+def term_weights(sims: list[SimConfig]) -> dict[str, float]:
+    """Each fitness term's weight, the same in every run's config.
+
+    Raises ValueError if the runs weigh a term differently, since one figure
+    then cannot name one weight per term.
+    """
+    weights = {}
+    for term, setting in TERM_WEIGHTS.items():
+        values = {1.0 if setting is None else getattr(sim, setting) for sim in sims}
+        if len(values) != 1:
+            msg = f"the runs weigh {term} differently: {sorted(values)}"
+            raise ValueError(msg)
+        weights[term] = values.pop()
+    return weights
 
 
-def longer_walks(final: Path, out: Path) -> None:
-    """Brains that reach the target at 15 s and with 30 s, own arena and unseen."""
-    folders = [final / condition for condition in CONDITIONS]
-    needed = ("longer_walks.json", "unseen.json", f"unseen_{LONG_TEST:g}s.json")
-    if missing_inputs("longer_walks", folders, needed):
-        return
-    shares = {folder.name: reach_shares(runs_of(folder)) for folder in folders}
-    seeds = max(len(runs_of(folder)) for folder in folders)
-    reached = max(max(share["unseen"]) for share in shares.values())
-    unseen_top = max(15.0, 5 * np.ceil(reached / 5))  # 15%, or the next 5% up
-    figure, (own_axis, unseen_axis) = plt.subplots(
-        1, 2, figsize=(COLUMN, 1.85), sharey=True
+def term_label(term: str, weight: float, means: pd.Series, longest: float) -> str:
+    """A term's legend entry: its name and weighted symbol from Equation 1.
+
+    A term too thin to see in the bars (below `THIN_SEGMENT` of the longest)
+    lists its largest mean over the conditions, rounded up, or "always 0".
+    """
+    name = TERMS[term][0].format(
+        w="" if weight == 1 else f"{weight:g}\\,", v=f"{weight:g}"
     )
-    for y, condition in enumerate(CONDITIONS):
-        colour = CONDITION_COLOURS[condition]
-        for axis, key in ((own_axis, "own"), (unseen_axis, "unseen")):
-            short, long = shares[condition][key]
-            axis.plot([short, long], [y, y], color=colour, linewidth=1.0, zorder=2)
-            axis.scatter(
-                short, y, s=14, facecolor="white", edgecolor=colour, lw=0.9, zorder=3
-            )
-            axis.scatter(long, y, s=14, color=colour, zorder=3)
-    for axis in (own_axis, unseen_axis):
-        print_axis(axis, grid="x")
-    own_axis.set_yticks(range(len(CONDITIONS)), [label(c) for c in CONDITIONS])
-    own_axis.invert_yaxis()
-    own_axis.set_xlim(-0.06 * seeds, 1.06 * seeds)
-    own_axis.set_xticks(np.arange(0, seeds + 1, 1 if seeds <= 6 else 5))
-    own_axis.set_xlabel(
-        f"own arena:\nbrains reaching it (of {seeds_per_condition(folders)})"
-    )
-    unseen_axis.set_xlim(-0.8 * unseen_top / 15, unseen_top)
-    unseen_axis.set_xticks(np.arange(0, unseen_top + 1, 5 if unseen_top <= 20 else 10))
-    unseen_axis.set_xlabel("20 unseen arenas:\nwalks reaching it (%)")
-    unseen_axis.tick_params(axis="y", length=0)
-    unseen_axis.scatter([], [], s=14, facecolor="white", edgecolor=MUTED, label="15 s")
-    unseen_axis.scatter([], [], s=14, color=MUTED, label=f"{LONG_TEST:g} s")
-    unseen_axis.legend(
-        frameon=False, loc="lower right", handletextpad=0.1, borderaxespad=0.0
-    )
-    panel(own_axis, "a", x=-0.12)
-    panel(unseen_axis, "b", x=-0.12)
-    figure.tight_layout(w_pad=1.0)
-    save(figure, "longer_walks", out)
-
-
-def probabilities(final: Path, out: Path) -> None:
-    """P(row converges faster than column), from the AUC, paired by seed."""
-    folders = [final / condition for condition in EAS]
-    if missing_inputs("probabilities", folders):
-        return
-    table = run_table(folders)
-    pairs = pd.DataFrame(pair_rows(table, "auc", DEFAULT_ROPE))
-    matrix = np.full((len(EAS), len(EAS)), np.nan)
-    for i, a in enumerate(EAS):
-        for j, b in enumerate(EAS):
-            match = pairs[(pairs["a"] == a) & (pairs["b"] == b)]
-            if not match.empty:
-                matrix[i, j] = match["p_a_better_at_all"].iloc[0]
-    figure, axis = plt.subplots(figsize=(COLUMN, 2.3))
-    axis.imshow(matrix, cmap=DIVERGING, vmin=0, vmax=1)
-    for i in range(len(EAS)):
-        for j in range(len(EAS)):
-            value = matrix[i, j]
-            dark = not np.isnan(value) and abs(value - 0.5) > 0.3
-            axis.text(
-                j,
-                i,
-                "—" if np.isnan(value) else f"{100 * value:.0f}%",
-                ha="center",
-                va="center",
-                fontsize=7,
-                color="white" if dark else INK,
-            )
-    names = [label(c) for c in EAS]
-    axis.set_xticks(range(len(EAS)), names, rotation=25, ha="right")
-    axis.set_yticks(range(len(EAS)), names)
-    axis.set_xlabel("column")
-    axis.set_ylabel("row")
-    for side in axis.spines.values():
-        side.set_visible(False)
-    axis.tick_params(length=0, labelcolor=INK)
-    save(figure, "probabilities", out)
+    largest = float(means.max())
+    if largest >= THIN_SEGMENT * longest:
+        return name
+    if (means == 0).all():
+        return f"{name} (always 0)"
+    return f"{name} (\u2264 {np.ceil(100 * largest) / 100:.2f})"
 
 
 def fitness_terms(final: Path, out: Path) -> None:
     """The champion's fitness split into its weighted terms, mean over seeds.
 
-    Needs every run's `unseen.json` (`champion`) and `summary.json`; without
-    them the figure is skipped.
+    The terms are those of the paper's Equation 1, in its order and with the
+    weights of the runs' config. Needs every run's `unseen.json` (`champion`)
+    and `summary.json`; without them the figure is skipped.
     """
     folders = [final / condition for condition in CONDITIONS]
     if missing_inputs("fitness_terms", folders, ("unseen.json", "summary.json")):
         return
-    rows = []
+    rows, sims = [], []
     for folder in folders:
         for run in runs_of(folder):
             sim = saved_sim_config(json.loads((run / "config.json").read_text())["sim"])
@@ -621,24 +668,39 @@ def fitness_terms(final: Path, out: Path) -> None:
                 msg = f"{run}: terms sum to {sum(terms.values())}, fitness {fitness}"
                 raise ValueError(msg)
             rows.append({"condition": folder.name, **terms})
+            sims.append(sim)
+    weights = term_weights(sims)
     means = pd.DataFrame(rows).groupby("condition").mean().loc[list(CONDITIONS)]
-    used = [term for term in TERMS if means[term].abs().max() > 0]
-    figure, axis = plt.subplots(figsize=(COLUMN, 2.0))
+    used = [term for term in TERMS if weights[term] != 0]
+    print("fitness terms of the champions, weighted, mean over the seeds:")
+    gait = [term for term in used if term not in ("distance", "mean_distance")]
+    table = means[used].assign(gait=means[gait].sum(axis=1))
+    print(table.assign(total=means[used].sum(axis=1)).round(3).to_string())
+    longest = float(means[used].sum(axis=1).max())
+    # Narrower than the column: the condition names stick out to the left.
+    figure, axis = plt.subplots(figsize=(COLUMN - 0.13, 1.75))
     left = np.zeros(len(CONDITIONS))
+    handles = []
     for term in used:
-        name, colour = TERMS[term]
+        values = means[term].to_numpy()
+        drawn = values > 0  # a 0-wide bar would still leave a hairline
+        # No white edges between the segments: they would hide a thin one.
         axis.barh(
-            range(len(CONDITIONS)),
-            means[term],
-            left=left,
+            np.flatnonzero(drawn),
+            values[drawn],
+            left=left[drawn],
             height=0.62,
-            color=colour,
-            edgecolor="white",
-            linewidth=0.5,
-            label=name,
+            color=TERMS[term][1],
+            linewidth=0,
             zorder=2,
         )
-        left += means[term].to_numpy()
+        handles.append(
+            mpl.patches.Patch(
+                color=TERMS[term][1],
+                label=term_label(term, weights[term], means[term], longest),
+            )
+        )
+        left += values
     for y, total in enumerate(left):
         axis.text(total + 0.03, y, f"{total:.2f}", va="center", fontsize=6.5, color=INK)
     print_axis(axis, grid="x")
@@ -649,12 +711,13 @@ def fitness_terms(final: Path, out: Path) -> None:
         f"champion's fitness by term (mean of {seeds_per_condition(folders)} seeds)"
     )
     axis.legend(
+        handles=handles,
         frameon=False,
         loc="upper center",
-        bbox_to_anchor=(0.42, -0.24),
-        ncols=3,
+        bbox_to_anchor=(0.33, -0.27),
+        ncols=2,
         handlelength=1.2,
-        columnspacing=0.9,
+        columnspacing=1.2,
     )
     save(figure, "fitness_terms", out)
 
@@ -686,9 +749,7 @@ def main() -> None:
     warn_about_short_runs({c: runs_of(args.final / c) for c in CONDITIONS})
     convergence(args.final, args.out)
     final_spread(args.final, args.out)
-    probabilities(args.final, args.out)
     fitness_terms(args.final, args.out)
-    longer_walks(args.final, args.out)
     interval(args.olympic, args.out)
 
 

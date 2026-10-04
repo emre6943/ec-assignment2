@@ -119,7 +119,16 @@ LOG_COLUMNS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class EAConfig:
-    """Every EA setting. Only `policy` differs between research conditions."""
+    """Every EA setting. Only `policy` differs between research conditions.
+
+    The defaults are the settings of the EARLY experiments, not the paper's.
+    They stay as they are because every saved run's config.json is read back
+    against them (`run.finished_with`, `Experiment.restore`), and experiments
+    14 and 19-26 rely on them. The paper's settings (experiment 99) are the
+    flags in `experiments/99_final_experiment.sh`; a field whose paper value
+    differs from its default says so in a `# paper:` comment. The options
+    that only earlier experiments used are grouped as such in `run.py --help`.
+    """
 
     algorithm: Algorithm = "island"
     policy: Policy = "best"
@@ -128,13 +137,13 @@ class EAConfig:
     # Islands and migration (decision D11)
     n_islands: int = 4
     island_size: int = 20
-    migration_interval: int = 10
+    migration_interval: int = 10  # paper: 20 (D11, experiment 26)
     n_migrants: int = 2
 
     # Selection and variation (decisions D7-D9)
     n_elites: int = 2
     tournament_size: int = 3
-    crossover_probability: float = 0.5
+    crossover_probability: float = 0.5  # paper: 0.9 (D7, D22)
     # "neuron" (D7) keeps hidden neurons whole; "weight", "blx" and "headless"
     # (a random genotype as the second parent) are experiment 25's alternatives.
     crossover: CrossoverKind = "neuron"
@@ -165,7 +174,7 @@ class EAConfig:
     spawn_yaws: str = "0"
     # Place the robot with ARIEL's own floor correction, exactly as the
     # template does, instead of 2 cm above the real ground (decision D2a).
-    ariel_spawn: bool = False
+    ariel_spawn: bool = False  # paper: True (D2a)
 
     # Curriculum and early stopping (decision D16); both off by default. Over
     # the first `curriculum_generations` generations, the reward for moving at
@@ -235,6 +244,18 @@ def check_config(config: "EAConfig") -> None:
             problems.append("stall_generations needs terrain_mode per_run")
     if problems:
         raise ValueError("; ".join(problems))
+
+
+def finite_or_failed(score: Score) -> Score:
+    """`score`, or `FAILED_SCORE` if any part of it is NaN or infinite.
+
+    A NaN anywhere in the score makes the fitness NaN, and `np.argmin` (the
+    tournament, the run's best) picks a NaN over every real number, so a
+    walk that blew up could win.
+    """
+    if all(np.isfinite(getattr(score, part)) for part in SCORE_PARTS):
+        return score
+    return FAILED_SCORE
 
 
 def operator_rng(seed: int) -> np.random.Generator:
@@ -792,9 +813,9 @@ class Experiment:
 
         Everybody - on every island - walks the same terrains, so their
         fitness values are directly comparable (decision D10). In "per_run"
-        mode these are the seed's fixed terrains; in "per_generation" mode
-        `n_terrains` brand-new `RuggedTerrainWorld()` terrains are generated
-        for this generation and deleted afterwards.
+        mode (the final experiment) these are the seed's fixed terrains; in
+        "per_generation" mode (experiments 1-3) `n_terrains` new copies of the
+        run's world are built for this generation and deleted afterwards.
         """
         if self.fixed_terrain:
             paths = self.terrain_paths
@@ -814,11 +835,10 @@ class Experiment:
         todo = [ind for ind in population if ind.alive and ind.requires_eval]
         min_progress = self.min_progress()
         tasks = [(list(ind.genotype), paths, self.sim, min_progress) for ind in todo]
-        for individual, score in zip(
+        for individual, walked in zip(
             todo, self.pool.map(evaluate_task, tasks), strict=True
         ):
-            if not np.isfinite(score.distance):
-                score = FAILED_SCORE
+            score = finite_or_failed(walked)
             individual.tags = {
                 **individual.tags,
                 **{part: getattr(score, part) for part in SCORE_PARTS},

@@ -1648,8 +1648,10 @@ over.
 
 ## D25. Statistical test for the final experiment — ✅ paired t-test if the differences are bell-shaped, Wilcoxon otherwise (2026-10-02)
 
-**When:** Emre fixed this rule on 2026-10-02 around 23:45 CEST, after experiment 99 had
-started (23:35) and before any of its results existed. Fixing it first means the choice of
+**When:** Emre fixed this rule on 2026-10-02 at 23:34 CEST, after experiment 99 had
+started (about 23:29) and before the first of its 120 runs had finished (23:36); the code
+that applies it was finished at 23:51, when four runs were done and no comparison was
+possible yet. Fixing it first means the choice of
 test cannot be bent towards significance once the numbers are in.
 
 **The rule** (`analyze.py`), for each metric on its own (final fitness, AUC, unseen
@@ -1702,7 +1704,7 @@ numbers. The Friedman test and the planned comparisons stay exactly as they were
 **Caveat:** choosing the test from a normality pre-test is a two-stage procedure. The
 main test's p-value then depends on what the pre-test found, and simulations show that
 this can shift the error rates of both tests (Rochon, Gondan & Kieser 2012, for two
-independent samples). We limit this by fixing the rule before any result existed and by
+independent samples). We limit this by fixing the rule before any run had finished and by
 applying it per metric to all pairs at once, so the choice is made three times, not 45
 times. Both tests' p-values are in `paired_tests.csv`, so a reader can check whether a
 conclusion depends on the choice.
@@ -1735,7 +1737,7 @@ with reaching the target counting most. Speed only matters when compute is limit
 (random search never reaches the target and is far behind everywhere), per run: whether
 the best brain reaches its own target in 15 s (the training length) and within 30 s
 (yes/no, `longer_walks.json`); the share of the 20 unseen arenas it reaches within 30 s
-(none arrives within 15 s); its mean fitness on the unseen arenas (15 s); and, shown but
+(5 of the 2,000 walks arrive within 15 s); its mean fitness on the unseen arenas (15 s); and, shown but
 not tested, how many unseen walks fell off the arena within 30 s. All paired by seed and
 Holm-corrected across the 10 pairs: the yes/no measures with Cochran's Q (Cochran 1950;
 do the arrival rates differ at all?) and exact McNemar tests (McNemar 1947), the others
@@ -1760,6 +1762,24 @@ targets (6%) and falls off most often (17). The unseen fitness also charges a fa
 
 **Caveat:** the measures were chosen after the results were known, so the analysis
 describes rather than confirms; its p-values are reported for completeness.
+
+**Two more descriptive measures, added in the paper review (2026-10-03), untested:**
+
+- **Diversity** (`final_spread` in `analysis/summary.md`): the mean distance of the 80
+  genotypes to their centroid at the end of the run, from the `spread` column that
+  `log.csv` always recorded for the whole population. Migrating the best ends at 1.68 ±
+  0.48, below the single-population standard EA (1.93 ± 0.14) and below no migration
+  (7.38 ± 0.20) on all 20 seeds; random migration 4.19 ± 1.42; worst 7.12 ± 0.56; random
+  search, i.e. random genomes, 7.23. So migrating the best does make the islands alike, as
+  Cantú-Paz predicts (H2's mechanism), while migrating the worst keeps them as far apart as
+  isolated islands (H3). The earlier draft read "one champion on all islands in 4.3% of the
+  generations" as "the islands kept their differences"; a shared champion is not a
+  diversity measure, so that claim was dropped.
+- **Median evaluations to 1.6 over all runs** (in `summary.md`'s `evals_to_threshold`
+  cell), a run that never got there counting as slowest. The mean over the runs that got
+  there flatters a condition whose slow runs never arrived (no migration: mean 4,501 over
+  15 runs, median 4,976 over 20). Medians: standard 3,680, best 3,968, random 4,184, worst
+  4,472, no migration 4,976. The paper's Table 3 reports the median.
 
 ## References (to verify when writing the report)
 

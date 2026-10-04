@@ -10,6 +10,8 @@ with any number of hidden layers, all with tanh activations:
 
     inputs (+ bias) --W1--> hidden 1 (+ bias) --W2--> ... --Wn--> outputs (tanh)
 
+The paper's network is 16-8-4-8: 212 weights, biases included.
+
 Genotype layout: the weight matrices one after another, in layer order. Each
 matrix is (neurons in + 1) x (neurons out); its last row holds the biases of
 the layer it feeds. So column j of a matrix is everything flowing INTO neuron j
@@ -19,6 +21,7 @@ relies on.
 
 # Standard library
 from dataclasses import dataclass
+from itertools import pairwise
 
 # Third-party libraries
 import numpy as np
@@ -46,8 +49,7 @@ class NetworkShape:
     @property
     def matrix_shapes(self) -> list[tuple[int, int]]:
         """Shape of each weight matrix, bias row included."""
-        sizes = self.layer_sizes
-        return [(n_in + 1, n_out) for n_in, n_out in zip(sizes, sizes[1:])]
+        return [(n_in + 1, n_out) for n_in, n_out in pairwise(self.layer_sizes)]
 
     @property
     def n_weights(self) -> int:
@@ -104,7 +106,7 @@ def layers(genotype: Genotype, shape: NetworkShape) -> Layers:
     """`unpack`, with every matrix split into its weights and its bias row.
 
     A walk runs the same network hundreds of times, so it cuts the network up
-    once and calls `run_layers` (one of the walk speed-ups of 2026-10-02).
+    once and calls `run_layers` instead of `forward` at every update.
     """
     return [(matrix[:-1], matrix[-1]) for matrix in unpack(genotype, shape)]
 

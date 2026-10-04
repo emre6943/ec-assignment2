@@ -8,3 +8,4 @@ __pycache__/
 results/
 .DS_Store
 !report/figures/walk_filmstrip.png
+submission/

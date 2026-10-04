@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Experiment 14: THE research-question experiment on the final setup (D3).
+# Experiment 14: the research question on the final setup, first version (D3):
+# 5 seeds, migration every 10 generations. The paper reports it as the
+# preliminary study; experiment 99 is the final experiment.
 #
 # The final EA, and the decision or experiment behind each part:
 #   body and world   spider_8 on OlympicArena, target 2 m ahead (D1, D2); the
@@ -32,7 +34,7 @@
 # OlympicArena's rugged strip is random on every build, so each seed gets one
 # arena (results/olympic/terrains/olympic/spider_8/seed<S>/
 # terrain0_arielspawn.mjb), shared by all six conditions (D10).
-# 8-10 minutes per run, about 4 hours in total on a 10-core Mac. Runs that
+# 8-10 minutes per run, about 4 hours in total on a 10-core laptop. Runs that
 # already finished with exactly these settings are skipped, so an interrupted
 # run can simply be started again.
 #
@@ -76,6 +78,3 @@ uv run --project ../ariel python analyze.py "${conditions[@]}" \
     --reference none --out "$out/analysis"
 uv run --project ../ariel python analyze.py "${conditions[@]}" \
     --reference standard --out "$out/analysis_vs_standard"
-
-# The compute ledger for the report, now including this experiment.
-uv run --project ../ariel python compute_ledger.py

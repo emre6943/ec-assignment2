@@ -1,6 +1,6 @@
 """Plot what happened in one run.
 
-    uv run --project ../ariel python plot.py results/best/seed0
+    uv run --project ../ariel python plot.py results/final/best/seed10
 
 Writes `run.png` into the run's folder with four panels, all against the
 number of evaluations spent:

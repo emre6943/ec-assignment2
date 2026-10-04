@@ -21,16 +21,25 @@ from ariel.ec import FloatMutator, Population, set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 
 from ea import (
+    SCORE_PARTS,
     EAConfig,
     Experiment,
     check_config,
+    finite_or_failed,
     new_individual,
     next_sigma,
     operator_rng,
 )
 from replay import make_controller
 from run import as_standard, finished_with
-from simulate import SimConfig, build_model, final_sim_config
+from simulate import (
+    FAILED_SCORE,
+    Score,
+    SimConfig,
+    build_model,
+    final_sim_config,
+    fitness,
+)
 
 TINY_SIM = SimConfig(duration=0.3, hidden_layers="4")
 
@@ -162,6 +171,40 @@ def test_operator_stream_is_independent_of_ariels_mutation_stream() -> None:
 def test_impossible_settings_are_rejected(setting: str, value: int | str) -> None:
     with pytest.raises(ValueError, match=setting):
         check_config(replace(EAConfig(), **{setting: value}))
+
+
+GOOD_SCORE = Score(
+    distance=0.1, displacement=1.9, ground_contact=0.0, upside_down=0.0, seconds=15.0
+)
+
+
+@pytest.mark.parametrize("part", SCORE_PARTS)
+def test_a_score_with_any_non_finite_part_counts_as_failed(part: str) -> None:
+    assert finite_or_failed(GOOD_SCORE) == GOOD_SCORE
+    for bad in (np.nan, np.inf, -np.inf):
+        assert finite_or_failed(replace(GOOD_SCORE, **{part: bad})) == FAILED_SCORE
+
+
+class NaNPool:
+    """Stands in for the worker pool: every walk ends near the target, but its
+    ground contact is NaN."""
+
+    def map(self, function: object, tasks: list[object]) -> list[Score]:
+        return [replace(GOOD_SCORE, ground_contact=np.nan) for _ in tasks]
+
+
+def test_a_walk_with_a_nan_part_cannot_win(tmp_path: Path) -> None:
+    """A NaN fitness would win every `np.argmin`; it must get the failed one."""
+    experiment = Experiment(
+        tiny_config("best"),
+        TINY_SIM,
+        tmp_path,
+        NaNPool(),
+        world_factory=SimpleFlatWorld,
+    )
+    population = experiment.evaluate(experiment.initial_population())
+    expected = fitness(FAILED_SCORE, TINY_SIM)
+    assert all(individual.fitness == expected for individual in population)
 
 
 def test_log_has_best_final_and_best_is_monotone(tmp_path: Path, pool: Pool) -> None:

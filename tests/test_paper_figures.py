@@ -5,17 +5,24 @@ import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
+from analyze import GRID_POINTS, run_metrics
 from paper_figures import (
+    TERMS,
+    auc_grid,
     champion,
     common_generations,
     generation_size,
     main,
     missing_inputs,
+    paired_gaps,
     seeds_per_condition,
     shared_champion_share,
+    term_label,
+    term_weights,
     weighted_terms,
 )
 from rq_figure import CONDITIONS
@@ -106,11 +113,6 @@ def write_final_run(run: Path, distance: float, reached: float) -> None:
     walk = {"fitness": [best], "scores": [asdict(score)]}
     unseen = {"distance_mean": distance + 0.5, "reached": reached}
     (run / "unseen.json").write_text(json.dumps({"training": walk, "unseen": unseen}))
-    (run / "unseen_30s.json").write_text(
-        json.dumps({"unseen": {"reached": 2 * reached}})
-    )
-    arrived = {"arrived_at": 14.0 if distance < 0.2 else None}
-    (run / "longer_walks.json").write_text(json.dumps({"15": arrived, "30": arrived}))
 
 
 def test_the_figures_come_from_the_folders_given(
@@ -126,10 +128,8 @@ def test_the_figures_come_from_the_folders_given(
         sys, "argv", ["paper_figures.py", *arguments, "--out", str(out)]
     )
     main()
-    drawn = ("convergence", "final_spread", "probabilities", "fitness_terms")
-    expected = {
-        f"{name}.{kind}" for name in (*drawn, "longer_walks") for kind in ("pdf", "png")
-    }
+    drawn = ("convergence", "final_spread", "fitness_terms")
+    expected = {f"{name}.{kind}" for name in drawn for kind in ("pdf", "png")}
     assert {path.name for path in out.iterdir()} == expected
     # Experiment 26 is not there: only the interval figure is skipped.
     printed = capsys.readouterr().out
@@ -177,3 +177,80 @@ def test_a_walk_that_did_not_score_the_runs_best_is_refused(tmp_path: Path) -> N
     (run / "summary.json").write_text(json.dumps({"best_fitness_seen": best - 0.001}))
     with pytest.raises(ValueError, match="unseen.json"):
         champion(run)
+
+
+def curve(evaluations: list[int], fitness: list[float]) -> pd.DataFrame:
+    """A best-so-far curve as `analyze.best_so_far` returns it."""
+    return pd.DataFrame(
+        {"evaluations": evaluations, "fitness": fitness, "distance": fitness}
+    )
+
+
+def test_the_auc_grid_runs_to_the_end_of_the_shortest_run() -> None:
+    curves = {
+        "a": {"seed0": curve([80, 152, 224], [3.0, 2.0, 1.0])},
+        "b": {"seed0": curve([80, 152], [3.0, 2.5])},
+    }
+    grid = auc_grid(curves)
+    assert len(grid) == GRID_POINTS
+    assert grid[0] == 0
+    assert grid[-1] == 152
+
+
+def test_the_mean_gap_over_the_run_is_the_auc_difference() -> None:
+    """Panel (b) of the convergence figure averages to the paper's AUC result."""
+    runs = {
+        "seed0": curve([80, 152, 224, 296], [3.0, 2.0, 1.5, 1.0]),
+        "seed1": curve([80, 152, 224, 296], [2.8, 2.8, 1.2, 1.1]),
+    }
+    reference = {
+        "seed1": curve([80, 152, 224, 296], [2.9, 2.0, 2.0, 1.9]),
+        "seed0": curve([80, 152, 224, 296], [3.0, 2.5, 2.5, 1.2]),
+    }
+    grid = auc_grid({"a": runs, "b": reference})
+    gaps = paired_gaps(runs, reference, grid)
+    assert gaps.shape == (2, GRID_POINTS)
+    assert gaps[0, -1] == pytest.approx(1.0 - 1.2)  # seed0 against seed0
+    auc = {
+        name: {seed: run_metrics(c, grid, 1.6)["auc"] for seed, c in group.items()}
+        for name, group in (("a", runs), ("b", reference))
+    }
+    differences = [auc["a"][seed] - auc["b"][seed] for seed in runs]
+    assert gaps.mean() == pytest.approx(np.mean(differences))
+
+
+def test_gaps_need_the_same_seeds() -> None:
+    one = {"seed0": curve([80], [3.0])}
+    other = {"seed1": curve([80], [3.0])}
+    with pytest.raises(ValueError, match="seeds differ"):
+        paired_gaps(one, other, np.array([0.0, 80.0]))
+
+
+def test_every_run_must_weigh_the_terms_alike() -> None:
+    weights = term_weights([SIM, SIM])
+    assert weights["distance"] == 1.0
+    assert weights["mean_distance"] == 0.5
+    with pytest.raises(ValueError, match="mean_distance"):
+        term_weights([SIM, replace(SIM, speed_weight=1.0)])
+
+
+def test_the_legend_names_equation_1s_terms_and_lists_thin_ones() -> None:
+    assert list(TERMS)[:6] == [
+        "distance",
+        "mean_distance",
+        "ground_contact",
+        "low_body",
+        "upside_down",
+        "work_imbalance",
+    ]  # the order of Equation 1
+    wide = pd.Series([0.6, 0.5])
+    assert term_label("mean_distance", 0.5, wide, 2.5) == (
+        r"mean distance $0.5\,\bar{d}$ (speed)"
+    )
+    assert term_label("low_body", 1.0, wide, 2.5) == r"low core $\ell$"
+    thin = pd.Series([0.0032, 0.0192])
+    assert term_label("ground_contact", 1.0, thin, 2.5) == (
+        "core on ground $c$ (\u2264 0.02)"
+    )
+    never = pd.Series([0.0, 0.0])
+    assert term_label("upside_down", 1.0, never, 2.5) == "upside down $u$ (always 0)"

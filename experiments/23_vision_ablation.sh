@@ -19,6 +19,11 @@
 # only if its brains end closer to the target on the unseen arenas than the
 # 5-ray brains on all 3 seeds and on the mean; if several pass, the one with
 # the lowest mean. The training fitness at 6,000 evaluations is reported too.
+# Outcome (D5): no smaller set passed, so by this rule the 5 rays stayed. No
+# rays trained as well (1.339 vs 1.348) and did nearly as well on the unseen
+# arenas (0.970 vs 0.922 m), and a bump moves a ray input by only about 0.01,
+# so vision was then dropped anyway: a tie decided by measurement, not by
+# this rule. The paper reports it so (Section 2.2, Table 2).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

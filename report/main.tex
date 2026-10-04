@@ -4,9 +4,10 @@
 % Every number here comes from the repository: docs/decisions.md (Dx),
 % experiments/README.md, docs/compute.md, and for the final experiment (99)
 % results/final/: analysis/summary.md, analysis/stats.md, probabilities.md,
-% longer_walks.md, end_results.md;
-% the preliminary study (14, 26) is in results/olympic/. Search for \todo
-% before submitting.
+% longer_walks.md, end_results.md, the fitness-term means that
+% paper_figures.py prints and the few numbers paper_numbers.py prints; the
+% preliminary study (14, 26) is in results/olympic/. Figures: paper_figures.py (Figures 2-4) and filmstrip.py
+% (Figure 1). Search for \todo before submitting.
 \documentclass[sigconf]{acmart}
 
 \usepackage{booktabs}
@@ -46,17 +47,16 @@
   \vspace{0.3cm}
   {\Large Emigrant Selection in Island-Model Neuroevolution\\ of a Walking Robot\par}
   \vspace{1.6cm}
-  {\large Team 92 \todo{confirm the A2 team number}\par}
+  {\large Team 92\par}
   \vspace{0.8cm}
   \begin{tabular}{ll}
     Mehmet Emre Ozkan & 2933667 \\
     Wiktoria Popko    & 2938109 \\
     Manisha Venkatesha & 2922492 \\
     Anshul Rao        & 2914098 \\
-  \end{tabular}
-  \todo{confirm the team members}\par
+  \end{tabular}\par
   \vfill
-  {\large \todo{submission date}, October 2026\par}
+  {\large 3 October 2026\par}
   \vspace{1cm}
   Vrije Universiteit Amsterdam
 \end{titlepage}
@@ -80,19 +80,19 @@ We evolve the 212 weights of a 16-8-4-8 neural network that makes the
 eight-hinge \texttt{spider\_8} robot of the ARIEL framework walk 2\,m to a
 target on the OlympicArena within 15\,s. Our research question is how the
 emigrant-selection policy of a four-island ring model (migrating the best,
-the worst or random individuals, or not migrating at all) affects the speed and
-the outcome of evolution. Over 20 paired seeds of 12{,}000 evaluations each,
-every evolutionary algorithm beats random search by far (final fitness
-1.13--1.24 against 2.49; paired $t$-tests, Holm-corrected $p < 10^{-9}$).
-Between the policies the differences are small: migrating the best or random
-individuals probably converges faster than isolated islands (posterior
-probability 99\% and 98\% on the area under the convergence curve), migrating
-the worst barely does (76\%), and no difference between the evolutionary
-algorithms is significant after correcting for the 15 pairwise comparisons, in
-speed, final fitness or on 20 unseen arenas. By end results alone, a single
-population generalises best and random migration ends fittest and most
-consistently, but neither lead is significant. The 15\,s limit binds: given
-20\,s, 39 of 120 best brains reach their target instead of 19.
+the worst or random individuals, or not migrating at all) affects the
+convergence speed and the final quality of evolution. In 20 paired runs of
+12{,}000 evaluations per condition, every evolutionary algorithm (EA) clearly
+outperforms random search (final fitness 1.13--1.24 against 2.49, lower is
+better; Holm-corrected paired $t$-tests, $p < 10^{-9}$). Between the policies
+the differences are small: migrating the best or random individuals probably
+converges faster than no migration (posterior probabilities 99\% and 98\% on
+the area under the convergence curve), but after correction for 15 pairwise
+comparisons no difference between two EAs is significant in speed, final
+fitness or distance on 20 unseen arenas. Migrating the best made the islands
+as alike as a single population, yet this cost little within 166
+generations; migrating the worst behaved like no migration. Random migration
+ends with the best mean fitness and is never the worst EA on any seed.
 \end{abstract}
 
 \keywords{Neuroevolution, island model, migration policy, evolutionary robotics,
@@ -107,45 +107,46 @@ Evolutionary robotics designs robot controllers by evolving them in
 simulation~\cite{nolfi2000evolutionary}. A common choice is to fix the
 topology of a neural network and evolve its weights~\cite{floreano2008neuroevolution}:
 a continuous search space of hundreds of dimensions, rugged and multimodal,
-where a population easily converges early on a mediocre gait.
+in which a population can converge prematurely on a mediocre gait.
 
 Island models are a standard defence against such premature convergence. The
 population is split into sub-populations (islands, or demes) that evolve
-separately and exchange a few individuals from time to time
+separately and periodically exchange a few individuals
 (migration)~\cite{cantupaz1998survey,alba2002parallelism,whitley1999island}.
 Isolation lets the islands explore different regions; migration spreads good
 genetic material. How an island model behaves depends on the topology, the
 interval and size of migration, how emigrants are selected and whom they
 replace~\cite{skolicki2005influence}. Cantú-Paz~\cite{cantupaz2001migration}
 showed that choosing emigrants by fitness raises the selection pressure of the
-whole algorithm, which speeds up convergence but risks taking every island to
-the same solution. Those results concern genetic algorithms on benchmark
-functions. Neuroevolution adds a twist: two networks that solve a task can
+whole algorithm, which speeds up convergence but risks driving every island to
+the same solution. These results concern genetic algorithms on benchmark
+functions. Neuroevolution adds a complication: two networks that solve a task can
 order their hidden neurons differently (the competing-conventions
-problem~\cite{schaffer1992combinations}), so crossing a native with an
-immigrant from another lineage can produce a broken child. Whether migrating
+problem~\cite{schaffer1992combinations}), so recombining a native with an
+immigrant from another lineage can produce a non-functional child. Whether migrating
 the best is still the right choice for evolving a walking robot is therefore
 an open, practical question.
 
-We study it on the task of the assignment: evolve the weights of a
+We study this question on the assignment's task: evolving the weights of a
 neural-network controller so that a fixed robot body walks from its spawn
 point to a target. Our research question is:
 
 \begin{quote}
-\textbf{RQ.} How does the emigrant-selection policy of an island-model EA
+\textbf{RQ.} How does the emigrant-selection policy of an island-model evolutionary
+algorithm (EA)
 (migrating the \emph{best}, the \emph{worst} or \emph{random} individuals, or
 \emph{no} migration) affect the convergence speed and the final quality of
 evolved locomotion controllers?
 \end{quote}
 
 \noindent Following Cantú-Paz~\cite{cantupaz2001migration}, we expect:
-\textbf{H1}, migration of any kind converges faster than isolated islands;
-\textbf{H2}, migrating the best converges fastest, but ends at an equal or
+\textbf{H1}, every migration policy converges faster than no migration;
+\textbf{H2}, migrating the best converges fastest but ends at an equal or
 worse plateau than random migration, because the islands lose their
 differences; \textbf{H3}, migrating the worst behaves close to no migration.
 We compare the four policies with a standard single-population EA and random
 search on 20 paired seeds each, with a migration interval chosen in a
-preliminary study, and follow up with longer test walks.
+preliminary study, and then explore which algorithm ends best.
 
 % =====================================================================
 \section{Methods}
@@ -154,46 +155,48 @@ preliminary study, and follow up with longer test walks.
 
 The body is \texttt{spider\_8} from ARIEL's John Set: a core with four legs of
 two hinges each, eight position-controlled motors in total. The world is the
-\texttt{OlympicArena}: a flat start, then from $x = 0.5$\,m a strip of
+OlympicArena: a flat start, then from $x = 0.5$\,m a strip of
 centimetre-high bumps on which the target lies at $(2, 0)$\,m
-(Figure~\ref{fig:walk}). The robot spawns at the origin with ARIEL's default
-spawn, and each walk lasts 15\,s, as in the template; it ends early when the
+(Figure~\ref{fig:walk}). The robot starts at the origin, and each walk lasts
+15\,s, as in the assignment's template; it ends early when the
 core comes within 0.1\,m of the target. The network is queried at 50\,Hz
 (every 10 physics steps of 2\,ms); the motors' servos move the joints in
 between.
 
-Both body and world are free choices that stay fixed for the whole study; we
-chose them in pilots. Our first body, \texttt{spider\_16}, cannot lift itself:
-holding its 4\,kg up needs about 5\,N\,m per leg, while every John Set motor is
-limited to 0.66\,N\,m. On the rugged world the mean slope along the path
-is 25$^\circ$ and no body we tried got far; on the flat world
-\texttt{spider\_8} solves the task within about 2{,}000 evaluations, leaving no
-room for conditions to differ. The OlympicArena is learnable but not trivial.
+Body and world were free choices, made in pilot runs and then fixed. Our first
+body, \texttt{spider\_16}, cannot lift itself: its 4\,kg need about 5\,N\,m per
+leg, but every John Set motor delivers at most 0.66\,N\,m. On ARIEL's rugged
+world (mean slope 25$^\circ$ along the path) none of our bodies got far; on the
+flat world \texttt{spider\_8} solves the task within about 2{,}000
+evaluations, leaving no room for conditions to differ. The OlympicArena lies
+in between: learnable but not trivial.
 
-ARIEL draws the bumpy strip with unseeded noise, so every build is a new arena.
-Each seed therefore builds one arena once and every condition with that seed
-walks the same saved arena. This makes the fitness deterministic and the
-comparison between conditions paired by seed. Generalisation is tested
-afterwards on 20 fresh arenas (Section~\ref{sec:setup}).
+ARIEL places the bumps at random whenever the arena is built, so we build and
+save one arena per seed, and every condition with that seed walks it. This
+makes the fitness deterministic on a given machine and pairs the conditions by
+seed. Generalisation is tested afterwards on 20 unseen arenas
+(Section~\ref{sec:setup}).
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/walk_filmstrip.png}
-  \caption{An evolved brain (standard EA, seed 11) walking up the OlympicArena,
-  seen from above, at 0.2, 2.5, 5, 7.5 and 10.2\,s. It starts on the flat part
-  (bottom) and reaches the target on the bumpy strip after 10.3\,s.}
+  \caption{The best controller of one standard-EA run (seed 25) walking on its
+  training arena, seen from above. It starts on the flat part (bottom),
+  crosses onto the bumpy strip at $x = 0.5$\,m and arrives, its core within
+  0.1\,m of the target (red circle), after 13.84\,s.}
   \label{fig:walk}
 \end{figure}
 
 \subsection{Controller}
 
 The controller is a fully connected feed-forward network with two hidden layers
-of 8 and 4 \texttt{tanh} neurons and 8 \texttt{tanh} outputs, each scaled to a
-target angle in $[-\pi/2, \pi/2]$ for one hinge. With a bias on every neuron it
+of 8 and 4 $\tanh$ neurons and 8 $\tanh$ outputs, each scaled to a
+target angle in $[-\pi/2, \pi/2]$ for one hinge. With a bias on every neuron, it
 has 212 weights, which form the genome. Its 16 inputs are listed in
-Table~\ref{tab:inputs}. The network has no memory, so it gets a clock to walk
-to; the clock is a fixed input signal, not an oscillator inside the controller,
-so the controller is not a CPG. The target is given relative to the robot's
+Table~\ref{tab:inputs}. As the network has no memory, a clock input
+supplies the rhythm; it is a fixed signal rather than an oscillator inside the
+controller, so the controller is not a central pattern generator (CPG), which
+the assignment excludes. The target is given relative to the robot's
 heading rather than as an absolute position, so that ``the goal is 1\,m away,
 30$^\circ$ to the left'' means the same everywhere on the arena.
 
@@ -203,98 +206,98 @@ heading rather than as an absolute position, so that ``the goal is 1\,m away,
   \small
   \begin{tabular}{lcl}
     \toprule
-    Input & Size & What it tells the controller \\
+    Input & Size & Meaning \\
     \midrule
-    Joint angles & 8 & where each hinge is now \\
+    Joint angles & 8 & current angle of each hinge \\
     Clock & 2 & $\sin$ and $\cos$ of a 1\,Hz beat, for rhythm \\
     Target & 3 & distance / 2\,m; $\sin$, $\cos$ of its bearing \\
-    Tilt & 3 & the up direction seen from the core \\
+    Tilt & 3 & the up direction in the core's frame \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\paragraph{Why no vision} Our first controller also had distance rays to the
-terrain, designed for the rugged world's half-metre hills. On the OlympicArena
-a ray reads up to 3\,m while the bumps are about $\pm$2\,cm, so a bump moved a
-ray input by less than 0.01, and five, three, one or no rays did equally well
-(Table~\ref{tab:params}). We removed vision, which also shrank the genome.
+\paragraph{Inputs and network shape} Our first controller also sensed the
+terrain with distance rays, made for the rugged world's hills. On the
+OlympicArena a ray reads up to 3\,m and the bumps are about $\pm$2\,cm,
+so a bump moves a ray input by only about 0.01, and without rays the EA
+trained as well (Table~\ref{tab:params}); we removed vision. The 16-8-4-8
+shape won a comparison of six (Table~\ref{tab:params}), plausibly because four
+shared signals push the eight legs towards coordinated patterns.
 
-\paragraph{Why 16-8-4-8} Of six shapes (Table~\ref{tab:params}), the
-bottleneck of four was the only one better than a single layer of 16 on every
-tuning seed and on unseen arenas: driving eight motors through four shared
-signals pushes the legs towards coordinated patterns, with half the weights.
 
 \subsection{Fitness function}
 \label{sec:fitness}
 
 The assignment's fitness is the planar distance $d_T$ between the core's final
-position and the target. We started with exactly that, and nothing walked:
-the best networks of our first runs wiggled in place, their joint commands
-within $\pm 0.13$ of their range. Penalising the core for touching the ground
-and for being upside down made the robots move, but on video they crouched
-(the core 1.6\,cm above lying height, although the body can hold it 6\,cm up)
-and kept one leg tucked away (5--9$^\circ$ of movement against 17--77$^\circ$
-for the other legs). The distance alone gives evolution no reason to walk well
-before it walks at all, so we added terms for the mechanics of walking, and
-minimise
+position and the target. Early in the study we added penalties for the share
+of the walk in which the core touches the ground or the robot is upside down,
+as a robot can otherwise drag its core towards the target. The best controller of
+a long pilot run with this fitness came within 0.84\,m of the target, but in
+replays it crouched (the core 1.6\,cm above lying height, although the body can
+hold it 6\,cm up) and kept one leg tucked away (5--9$^\circ$ of commanded
+movement against 17--77$^\circ$ for the other legs). The distance does not
+reward the mechanics of walking until they already produce progress, so we
+added terms for them and minimise
 \begin{equation}
-  f = d_T + 0.5\,\bar{d} + 1.0\,c + 1.0\,u + 1.0\,\ell + 0.5\,w ,
+  f = d_T + 0.5\,\bar{d} + 1.0\,c + 1.0\,\ell + 1.0\,u + 0.5\,w ,
   \label{eq:fitness}
 \end{equation}
-where every term is measured at each 50\,Hz update and lies in $[0, 1]$ except
-the distances:
+where every term is measured at each 50\,Hz update and, except for the two
+distances, lies in $[0, 1]$:
 \begin{itemize}
-  \item \textbf{Stand} ($c$, $\ell$): $c$ is the share of the walk in which the
-  core touches the ground, and $\ell$ is the mean shortfall of the core's lift
-  above its lying height from a 4\,cm line, $\mathrm{clip}(1 - \mathrm{lift} /
-  4\,\mathrm{cm}, 0, 1)$. The body can hold itself 6\,cm up, so 4\,cm is
-  demanding but reachable, and every millimetre up to the line pays.
-  \item \textbf{Use all legs alike} ($w$): just as people use both legs about
-  equally, each leg should do about a quarter of the work. With $W_i$ the
-  positive motor work of leg $i$, $w = 1 - \min_i W_i / \overline{W}$: 0 when
-  every leg works alike, 1 when one leg is idle. We first measured how much
-  each leg moves, but a leg can move without pushing, and a leg that only props
-  the body up carries its share of the weight; only the motor work caught such
-  a lazy leg (22\,J against up to 40\,J for the others).
-  \item \textbf{Stay upright} ($u$): the share of the walk spent upside down.
   \item \textbf{Be fast} ($\bar d$): the distance to the target averaged over
-  the whole 15\,s, counting 0 after arrival, so that closing the distance early,
-  and arriving early, lower the fitness.
+  the whole 15\,s, counting 0 after arrival, so that closing the distance early
+  and arriving early both lower the fitness.
+  \item \textbf{Stand} ($c$, $\ell$): $c$ is the share of the walk in which the
+  core touches the ground, and $\ell$ is the mean shortfall of the core's
+  height $h$ above its lying height from 4\,cm,
+  $\min(1, \max(0, 1 - h / 4\,\mathrm{cm}))$. The body can hold itself 6\,cm
+  up, so 4\,cm is demanding but reachable, and every millimetre counts.
+  \item \textbf{Stay upright} ($u$): the share of the walk spent upside down.
+  \item \textbf{Use all legs alike} ($w$): each leg should do about a quarter
+  of the work. With $W_i$ the positive motor work of leg $i$ and
+  $\overline{W}$ its mean over the legs, $w = 1 - \min_i W_i / \overline{W}$:
+  0 when every leg works alike, 1 when one leg is idle. Measuring how much each
+  leg moves missed a leg that moved without pushing; only the motor work
+  exposed it (22\,J against up to 40\,J for the other legs).
 \end{itemize}
-The third mechanic of walking, \textbf{rhythm}, is not a fitness term: it is
-provided by the clock input. A robot that holds still scores 5.0 ($d_T = \bar d
-= 2$, core on the ground, nothing lifted), and one that arrives at once while
-standing tall and using all legs alike scores 0. A typical evolved brain (no
-migration, seed 10) scores $0.29 + 0.5 \cdot 1.12 + 0 + 0 + 0.09 + 0.5 \cdot
-0.11 = 1.00$: the two distance terms dominate, and the gait terms decide
-between walkers that get about equally far. This is behavioural shaping: it
-prescribes part of \emph{how} to walk, which the assignment allows if the
-metric is clearly defined. All conditions use the same fitness, and we report
-the plain distance as well.
+The term weights were set by hand in pilots and not tuned; with weight 1, spending
+the whole walk on the ground costs as much as ending 1\,m further away.
+Rhythm is not a fitness term: the clock input provides it. A robot that holds
+still scores 5.0 ($d_T = \bar d = 2$, core on the ground, nothing lifted), and
+one that arrives at once while standing tall and using all legs alike scores
+close to 0. A typical evolved controller
+(no migration, seed 10) scores $0.29 + 0.5 \cdot 1.12 + 0 + 0.09 + 0 + 0.5
+\cdot 0.11 = 1.00$: the two distance terms dominate, and the gait terms decide
+between walkers that get about equally far. This behavioural shaping
+prescribes part of \emph{how} to walk, which the assignment allows for a
+clearly defined metric; all conditions share it, and we also report the plain
+distance.
 
 \subsection{The evolutionary algorithm}
 
 The genome is a fixed-length vector of real numbers, so we use a real-coded
 genetic algorithm: Gaussian mutation explores around good weights, and
-recombination can combine good neurons found in different individuals. The
-island model is both the object of our study and a known guard against
-premature convergence on multimodal landscapes.
+recombination can combine good neurons found in different individuals. It is
+built on ARIEL's \texttt{ariel.ec} (population, generation loop and Gaussian
+mutation); selection, crossover and migration are our own.
 
 \paragraph{Representation and variation} A genome is the vector of 212 real
-weights, initialised from $\mathcal{N}(0, 0.5^2)$. Parents are chosen by
+weights, initialised from $\mathcal{N}(0, 0.5^2)$ as in the assignment's
+template. Parents are chosen by
 tournaments of three within an island~\cite{eiben2015introduction}. With probability 0.9 a child is made by
 \emph{neuron-level uniform crossover}: for every hidden neuron, a fair coin
-decides from which parent it inherits all of that neuron's incoming weights and
+decides from which parent the child inherits all of that neuron's incoming weights and
 bias (the second hidden layer's neurons also take their outgoing weights);
 each output bias comes from a random parent. Otherwise the child copies one
 parent. Every child is then mutated by adding $\mathcal{N}(0, 0.05^2)$ noise to
-every weight, with ARIEL's Gaussian mutation operator. Keeping neurons whole is the
+every weight. Keeping neurons whole is the
 classic response to the competing-conventions problem
 \cite{montana1989training,moriarty1996efficient}: the child inherits working
 units rather than a mixture of two units that may play different roles.
 
-\paragraph{Survivor selection} Generational with elitism: each island keeps
-its two best individuals unchanged and replaces the other 18 by children. As
+\paragraph{Survivor selection} Each generation, an island keeps its two
+best individuals unchanged (elitism) and replaces the other 18 with children. As
 the arena is fixed, the fitness is deterministic and elites are not
 re-evaluated.
 
@@ -310,51 +313,55 @@ population of 80 and 8 elites, so only the population structure differs.
 \emph{Random search} draws every new genome from the initial distribution and
 keeps the best, at the same budget, as the assignment requires.
 
-\paragraph{Budget} Each run stops after 12{,}000 evaluations (80 initial and
-72 children per generation: about 166 generations). Instead of a plateau rule,
-which never fired before the budget ran out in our pilots, we chose the budget
-from where the pilot curves flattened: 95\% of the progress of a long run came
+\paragraph{Budget} Each run stops at the first generation that completes
+12{,}000 evaluations: 80 initial evaluations, then 72 children in each of 166
+generations, 12{,}032 in all. A plateau-based stopping
+rule never triggered within our pilot budgets, so we chose the budget from
+where the pilot curves flattened: 95\% of the progress of a long run came
 within 5{,}000 evaluations and its last improvement at 8{,}800.
 
 \subsection{How the settings were chosen}
+\label{sec:settings}
 
 Table~\ref{tab:params} lists every setting with its justification. Settings
 were changed by controlled comparisons with a decision rule fixed beforehand:
 a new value replaces the current one only if its best fitness after 6{,}000
 evaluations is better on all three tuning seeds and on the mean. The tuning
 seeds (100--102) and their arenas are disjoint from those of the final
-experiment (10--29), and tuning used the random emigrant policy, which favours
-none of the policies we compare. Only one tuned value changed: crossover
-probability 0.9 (mean best fitness 1.369 against 1.800 at 0.5). The number of
-migrants, the topology and the replacement were not tuned: they set the
+experiment (10--29), and tuning used the random emigrant policy, the middle
+ground between sending the best and the worst. Two tested values passed the
+rule: crossover probability 0.9 (mean best fitness 1.369 against 1.800 at 0.5)
+and the 16-8-4-8 network; vision was dropped on a tie (above). The numbers of
+islands and migrants, the topology and the replacement were not tuned: they set the
 context of the RQ and take common values from the
-literature~\cite{cantupaz2001migration}. The interval started at the common
-10 generations; a preliminary study (Section~\ref{sec:interval}) set it to 20,
-a design choice rather than a tuning win: at 20 the islands stay distinct
-enough for the emigrant policy to matter.
+literature~\cite{cantupaz2001migration}; the interval came from a
+preliminary study (Section~\ref{sec:interval}).
 
 \begin{table*}[t]
-  \caption{Every setting of the final EA and how it was chosen. ``Tested''
-  rows were decided by the rule of Section~2.5 (3 seeds, 6{,}000
-  evaluations); best fitness shown as the mean over the seeds, lower is
-  better.}
+  \caption{Every setting of the final EA and how it was chosen. Tests used
+  the rule of Section~\ref{sec:settings} (3 seeds, 6{,}000 evaluations);
+  numbers are mean best fitness (lower is better), ``vs'' the setting in use
+  at the time, which changed as settings were adopted (early tests still had
+  vision, one hidden layer of 16 and a stagnation rule). ``Inconsistent'':
+  not better on every seed.}
   \label{tab:params}
   \small
   \begin{tabularx}{\textwidth}{@{}p{2.6cm}p{4.3cm}X@{}}
     \toprule
     Component & Setting & How it was chosen \\
     \midrule
-    Network & 16-8-4-8, \texttt{tanh}, 212 weights & tested against 16-8-8, 16-16-8, 16-32-8, 16-8-8-8, 16-16-16-8: only shape better on every seed (1.203 vs 1.339) \\
-    Inputs & 16, no vision & 10 $\to$ 5 rays (pilot); 5 vs 3, 1, 0 rays tested: no difference, rays carry $<$0.01 of signal \\
+    Network & 16-8-4-8, $\tanh$, 212 weights & tested against 16-8-8, 16-16-8, 16-32-8, 16-8-8-8, 16-16-16-8: the only shape better on every seed (1.203 vs 1.339 for 16-16-8) \\
+    Inputs & 16, no vision & 10 $\to$ 5 rays (pilot); 3 and 1 ray worse (1.628, 1.513 vs 1.348); 0 rays tied (1.339), dropped \\
     Parent selection & tournament, $k = 3$ & $k = 2$ and $5$ tested: inconsistent (1.877, 1.612 vs 1.800) \\
-    Crossover & neuron-level uniform & tested against weight-level uniform (1.416), BLX-0.5 (1.168, better on 2 of 3 seeds) and headless chicken (2.207) vs ours (1.203) \\
+    Crossover & neuron-level uniform & tested against weight-level uniform (1.416), BLX-0.5 (1.168, better on 2 of 3 seeds) and headless chicken, i.e.\ crossover with a random genome (2.207) vs ours (1.203) \\
     Crossover probability & 0.9 & 0, 0.5 and 0.9 tested: 0.9 better on every seed (1.369 vs 1.800; 0 gave 2.063) \\
     Mutation & Gaussian, $\sigma = 0.05$, every weight & pilot over $\sigma \in \{0.05, 0.1, 0.2\}$; then 0.02, 0.1, and 10\% of weights with $\sigma = 0.16$ tested: none better \\
     Mutation-step control & none & a rule doubling $\sigma$ on stagnating islands tested: 1.369 vs 1.348 without, dropped \\
     Survivor selection & generational, 2 elites per island & 1 and 5 elites tested: inconsistent (1.791, 1.811 vs 1.800) \\
-    Population & 4 islands $\times$ 20 & $4 \times 10$ and $4 \times 40$ tested: inconsistent (2.020, 1.693) \\
-    Migration & ring, every 20 generations, 2 copies, replace worst & literature~\cite{cantupaz2001migration}, interval from the preliminary study (Section~\ref{sec:interval}): every 20 kept the islands apart \\
-    Budget & 12{,}000 evaluations ($\approx$166 generations) & pilot curves: 95\% of the progress by 5{,}000, last gain at 8{,}800 \\
+    Population & 4 islands $\times$ 20 & $4 \times 10$ and $4 \times 40$ tested: inconsistent (2.020, 1.693 vs 1.800) \\
+    Migration & ring, every 20 generations, 2 copies, replace worst & literature~\cite{cantupaz2001migration}, interval from the preliminary study (Section~\ref{sec:interval}): every 20 kept the islands apart longest \\
+    Budget & 12{,}032 evaluations (166 generations) & pilot curves: 95\% of the progress by 5{,}000, last gain at 8{,}800 \\
+
     Walk & 15\,s, ends at the target & the template's length; 20\,s training walks tested: no better on unseen arenas \\
     \bottomrule
   \end{tabularx}
@@ -364,190 +371,211 @@ enough for the emigrant policy to matter.
 \section{Experimental setup}
 \label{sec:setup}
 
-\paragraph{Conditions} Six conditions: the island EA with the \emph{best},
+\paragraph{Conditions} We compare six conditions: the island EA with the \emph{best},
 \emph{worst}, \emph{random} and \emph{none} policies, the standard EA and
-random search. Each runs on seeds 10--29, 120 runs in all; a seed fixes the
-EA's random numbers and the arena, and all conditions with the same seed share
-that arena, which pairs the runs.
+random search. Each runs on seeds 10--29, 120 runs in all. A seed fixes the
+EA's random numbers, so all conditions start from the same 80 initial
+networks, and selects that seed's saved arena; the runs are thus paired by
+seed. Twenty seeds allow a paired test of every pair of conditions even after
+correcting for 15 pairs; with five, the smallest possible two-sided Wilcoxon
+$p$ is 0.0625.
 
 \paragraph{Preliminary study} A first version of this experiment ran the same
 six conditions on five seeds (0--4), migrating every 10 generations, and then
 the \emph{best} policy every 5, 20 and 50 generations on the same seeds and
 arenas (Section~\ref{sec:interval}). It set the interval of the final
-experiment to 20. Because the interval was chosen on seeds 0--4, the final
-experiment uses 20 fresh seeds and arenas.
+experiment to 20, a design choice rather than a tuning result: at 20 the
+islands stay distinct for longer, so the emigrant policy has more to act on. Because the
+interval was chosen on seeds 0--4, the final experiment uses 20 fresh seeds
+and arenas.
 
-\paragraph{Metrics} Lower is better for all.
+\paragraph{Metrics} Lower is better for every metric.
 (1)~The best-so-far fitness against evaluations, and its area under the curve
-(AUC), which rewards being good early.
-(2)~Convergence speed: the evaluations until the best fitness first drops below
-1.6. This threshold separated fast from slow runs in tuning, where no untuned
-run reached it.
-(3)~The final best fitness after 12{,}000 evaluations, and the closest any
-brain got to the target.
-(4)~Generalisation: each run's best brain walks 20 fresh arenas it never saw,
-and we report the mean distance left.
+(AUC; the mean best-so-far fitness over the budget), which rewards being good
+early.
+(2)~Convergence speed: the median number of evaluations until the best
+fitness first drops below 1.6, a run that never gets there counting as
+slowest. This threshold
+separated fast from slow runs in tuning: no run with the initial settings
+reached it within 6{,}000 evaluations.
+(3)~The final best fitness, and the smallest final distance $d_T$ of any walk
+of the run.
+(4)~Generalisation: each run's best controller walks 20 unseen arenas (the
+same 20 for every run) for 15\,s, and we report the mean remaining distance;
+a robot that falls off an arena counts as 10\,m away.
+(5)~Diversity (descriptive): the mean distance of the 80 genotypes to their
+centroid at the end of the run, large when the islands have evolved apart.
 
-\paragraph{Statistics} Every comparison is paired by seed. A Friedman test
-across the six conditions asks whether they differ at all. Then every pair of
+\paragraph{Statistics} Every comparison is paired by seed. A Friedman
+test~\cite{demsar2006statistical} across the six conditions asks whether they
+differ at all. Then every pair of
 conditions (15 pairs) is compared on the final fitness, the AUC and the unseen
 distance with a two-sided paired test, Holm-corrected across the pairs of each
-metric~\cite{holm1979simple}. The test was fixed before any result existed: if
-the per-seed differences of every pair look normal (Shapiro--Wilk, Holm-corrected,
+metric~\cite{holm1979simple}. The choice of test was fixed before any
+comparison was possible (before the first of the 120 runs had finished): if
+no pair's per-seed differences reject normality (Shapiro--Wilk, Holm-corrected,
 $\alpha = 0.05$~\cite{shapiro1965analysis}), the metric gets the paired
 $t$-test; otherwise the Wilcoxon signed-rank test~\cite{wilcoxon1945individual},
 the usual choice for comparing evolutionary
 algorithms~\cite{demsar2006statistical,derrac2011practical}, which needs no
-normality and keeps 95\% of the $t$-test's efficiency when the data are
+normality and loses little power when the data are
 normal~\cite{hodges1956efficiency}. We test normality rather than assume it
 because the arenas differ in difficulty: in the preliminary study the seed
 explained 37\% of the EAs' variance in final fitness and the condition 14\%, so a
-hard arena can make one seed's difference an outlier. For every pair we also
-give the probability that one condition has the lower true mean, from a
-Bayesian paired $t$-test with a flat prior~\cite{benavoli2017time}, with
-differences within $\pm0.05$ counting as practically equal.
+hard arena can make one seed's difference an outlier. Effect sizes are the mean
+paired difference with its 95\% CI and $d_z$, that difference divided by the
+standard deviation of the per-seed differences (by Cohen's convention,
+$|d_z| \approx 0.5$ is a medium effect~\cite{lakens2013calculating}). For
+every pair we also give the
+posterior probability that one condition has the lower true mean, from a
+Bayesian paired $t$-test with a non-informative prior~\cite{benavoli2017time}.
+It is not corrected for multiple comparisons, so it describes the evidence;
+only the Holm-corrected tests decide what we call significant.
 
-\paragraph{End results} After seeing the results we added an exploratory
-analysis of where the runs end, with reaching the target first
-(Section~\ref{sec:end}). Every best brain also walks its own arena for 15, 20,
-30 and 60\,s and the unseen arenas for 30\,s. Yes/no arrivals are compared with
-Cochran's $Q$~\cite{cochran1950comparison} and exact McNemar
-tests~\cite{mcnemar1947note}, the rest with the rule above, Holm-corrected over
-the ten pairs of EAs.
+\paragraph{End results} After seeing the results, we added an exploratory
+analysis of where the runs end, giving priority to reaching the target
+(Section~\ref{sec:end}). Every best controller also walks its own arena for
+15, 20, 30 and 60\,s and the unseen arenas for 30\,s. Arrivals (yes or no) are
+compared with Cochran's $Q$~\cite{cochran1950comparison} and pairwise exact
+McNemar tests~\cite{mcnemar1947note}, continuous measures with the rule above;
+pairwise tests are Holm-corrected over the ten pairs of EAs.
 
-\subsection{Compute}
-\label{sec:compute}
+\paragraph{Compute and code} The study took 345 runs, 3.62\,M evaluations and
+57 machine hours: 0.80\,M evaluations to develop the task, body and fitness,
+0.83\,M for tuning, 0.54\,M for the preliminary study and 1.44\,M for the
+final experiment, whose 120 runs took 8.4 hours on two machines, split by seed
+(an Intel i7-12700H for seeds 10--19, an Apple M3 Pro for 20--29). MuJoCo's
+floating-point results differ slightly between these
+architectures and the differences grow over a walk, so a seed's walks repeat
+exactly only on its kind of machine. Test runs, discarded runs and one
+showcase run are not counted. The code, which uses ARIEL (course fork, commit
+\texttt{a435b19}) unmodified, and one script per experiment are at
+\url{https://github.com/emre6943/ec-assignment2}; they and the saved arenas
+are also submitted with this report.
 
-\begin{table}[t]
-  \caption{Compute of the whole study, from the run logs: runs, evaluations
-  (mostly one 15\,s simulated walk each) and machine hours (run times added up).}
-  \label{tab:compute}
-  \small
-  \begin{tabular}{lrrr}
-    \toprule
-    Phase & Runs & Evaluations & Machine h \\
-    \midrule
-    Development (task, body, fitness) & 69 & 0.80\,M & 20.7 \\
-    Tuning (settings, 3 seeds) & 111 & 0.83\,M & 14.5 \\
-    Preliminary study (5 seeds) & 45 & 0.54\,M & 6.4 \\
-    Final experiment (20 seeds) & 120 & 1.44\,M & 15.4 \\
-    \midrule
-    Total & 345 & 3.62\,M & 57.0 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-Table~\ref{tab:compute} counts every run of the study. An evaluation is mostly
-one 15\,s walk of 7{,}500 physics steps of 2\,ms; with the unseen tests (10{,}809
-walks) the study simulated about 14{,}900 hours of walking. Each run spread its
-walks over 10--20 worker processes, so the 57 machine hours are at most roughly
-600 CPU-core hours. The final experiment ran on two machines at once,
-split by seed (an Apple M3 Pro and an Intel i7-12700H, about 7--8 minutes per
-run), and took 8.4 hours. Smoke tests, scratch diagnostics, overwritten runs and
-one 0.36\,M-evaluation showcase run outside the study are not counted. The code
-builds on ARIEL without changing it, and one script per experiment runs all its
-seeds and conditions. \todo{name the scripts or the repository in one sentence}
 
 % =====================================================================
 \section{Results}
 
+\subsection{Preliminary study: how often to migrate}
+\label{sec:interval}
+
+\begin{figure}[t]
+  \centering
+  \maybegraphic{0.94\columnwidth}{figures/interval.pdf}
+  \caption{Preliminary study: the \emph{best} policy migrating every 5, 10, 20
+  or 50 generations, or never (``off''), on seeds 0--4. (a) Final best fitness and
+  (b) distance left on 20 unseen arenas: dots are seeds, black the mean with
+  its 95\% interval. (c) Share of generations in which all four islands hold
+  the same champion; dots are seeds.}
+  \label{fig:interval}
+\end{figure}
+
+Migrating every 5, 10 or 20 generations was equally fast (AUC probabilities
+42--58\% between them) and faster than every 50 (93--99\%) or never
+(96--100\%); every 50 was only slightly faster than never (81\%), as three
+migrations in 166 generations hardly matter. Of the fast intervals, every 20
+kept one champion from taking all four islands longest
+(Figure~\ref{fig:interval}c) and had the best final fitness (1.093) and unseen
+distance (0.76\,m; Figure~\ref{fig:interval}a--b), though only modestly (58\%
+and 77\% against every 10), so we chose it to keep the islands diverse.
+
 \subsection{Convergence and final fitness}
+\label{sec:convergence}
 
 \begin{figure*}[t]
   \centering
   \maybegraphic{\textwidth}{figures/convergence.pdf}
-  \caption{Best-so-far fitness (a) and closest distance to the target (b)
-  against generations (top axis: evaluations), for every condition: the mean
-  over 20 seeds, with a band of $\pm 1$ standard deviation. Lower is better.}
+  \caption{(a) Best-so-far fitness against generations (top axis:
+  evaluations), mean over 20 seeds with a band of $\pm 1$ standard deviation;
+  lower is better. (b) Paired by seed: each EA's best-so-far fitness minus that
+  of no migration on the same seed, mean with 95\% confidence band; below zero
+  is ahead of no migration, and a curve's mean over the run is the AUC
+  difference. The island EAs equal no migration until the first migration
+  (generation 20); random search (about $+1$) is left out of (b).}
   \label{fig:convergence}
 \end{figure*}
 
 \begin{table*}[t]
-  \caption{Results of the final experiment after 12{,}000 evaluations, mean
+  \caption{Results of the final experiment at the end of the budget, mean
   $\pm$ standard deviation over 20 seeds (lower is better). ``Closest'' is the
-  closest any brain of the run got to the target; ``to 1.6'' counts only the
-  runs that got there. P(faster than no migration) is the probability, from a
-  Bayesian paired $t$-test over the 20 seeds, that the condition's mean AUC is
-  lower (it improves faster) than that of the isolated islands; 50\% would mean
-  no evidence either way.}
+  smallest final distance $d_T$ of any walk of the run; ``to 1.6'' is the
+  median over all runs, one that never got there counting as slowest (runs
+  that got there in brackets). P(faster than no migration) is the Bayesian
+  posterior probability that the condition's mean AUC is lower than without
+  migration. Bold: the best EA per column.}
   \label{tab:results}
   \small
   \begin{tabular}{lcccccc}
     \toprule
     Condition & Final fitness & Closest (m) & Evaluations to 1.6 & AUC & Unseen arenas (m) & P(faster than no migration) \\
     \midrule
-    Migrate best   & 1.162 $\pm$ 0.307 & 0.359 $\pm$ 0.239 & \textbf{4{,}076 $\pm$ 1{,}867} (18/20) & \textbf{1.562 $\pm$ 0.243} & 0.932 $\pm$ 0.201 & 99\% \\
-    Migrate worst  & 1.194 $\pm$ 0.341 & 0.376 $\pm$ 0.253 & 4{,}891 $\pm$ 2{,}404 (17/20) & 1.620 $\pm$ 0.234 & 0.915 $\pm$ 0.182 & 76\% \\
-    Migrate random & \textbf{1.130 $\pm$ 0.309} & \textbf{0.335 $\pm$ 0.234} & 4{,}576 $\pm$ 1{,}980 (18/20) & 1.570 $\pm$ 0.244 & 0.850 $\pm$ 0.194 & 98\% \\
-    No migration   & 1.243 $\pm$ 0.365 & 0.402 $\pm$ 0.259 & 4{,}501 $\pm$ 1{,}489 (15/20) & 1.648 $\pm$ 0.252 & 1.005 $\pm$ 0.338 & -- \\
-    Standard EA    & 1.171 $\pm$ 0.383 & 0.369 $\pm$ 0.287 & 4{,}713 $\pm$ 2{,}860 (17/20) & 1.610 $\pm$ 0.289 & \textbf{0.825 $\pm$ 0.221} & 66\% \\
-    Random search  & 2.490 $\pm$ 0.135 & 1.208 $\pm$ 0.096 & never (0/20) & 2.612 $\pm$ 0.068 & 1.406 $\pm$ 0.118 & 0\% \\
+    Migrate best   & 1.162 $\pm$ 0.307 & 0.359 $\pm$ 0.239 & 3{,}968 (18/20) & \textbf{1.562 $\pm$ 0.243} & 0.932 $\pm$ 0.201 & 99\% \\
+    Migrate worst  & 1.194 $\pm$ 0.341 & 0.376 $\pm$ 0.253 & 4{,}472 (17/20) & 1.620 $\pm$ 0.234 & 0.915 $\pm$ 0.182 & 76\% \\
+    Migrate random & \textbf{1.130 $\pm$ 0.309} & \textbf{0.335 $\pm$ 0.234} & 4{,}184 (18/20) & 1.570 $\pm$ 0.244 & 0.850 $\pm$ 0.194 & 98\% \\
+    No migration   & 1.243 $\pm$ 0.365 & 0.402 $\pm$ 0.259 & 4{,}976 (15/20) & 1.648 $\pm$ 0.252 & 1.005 $\pm$ 0.338 & -- \\
+    Standard EA    & 1.171 $\pm$ 0.383 & 0.369 $\pm$ 0.287 & \textbf{3{,}680} (17/20) & 1.610 $\pm$ 0.289 & \textbf{0.825 $\pm$ 0.221} & 66\% \\
+    Random search  & 2.490 $\pm$ 0.135 & 1.208 $\pm$ 0.096 & never (0/20) & 2.612 $\pm$ 0.068 & 1.406 $\pm$ 0.118 & $<$0.1\% \\
     \bottomrule
   \end{tabular}
 \end{table*}
 
-Figure~\ref{fig:convergence}, Table~\ref{tab:results} and
-Figure~\ref{fig:spread} summarise the final experiment. The conditions differ
+Table~\ref{tab:results} and Figures~\ref{fig:convergence}--\ref{fig:spread}
+summarise the final experiment. The conditions differ
 (Friedman $\chi^2 = 46.6$ on the final fitness and 47.5 on the AUC, both $p <
-10^{-8}$), and the difference is random search: every EA beats it on every
-metric (Holm-corrected $p \le 0.007$; posterior probability 100\%). Random
-search never reached a fitness of 1.6 and came no closer than 1.21\,m to the target.
-Following the rule fixed in advance, the final fitness and the AUC were tested
-with paired $t$-tests, as no pair's differences rejected normality, and the
-unseen distance with Wilcoxon tests: one isolated-islands brain fell off 3 of
-its 20 unseen arenas within 15\,s, which count as 10\,m from the target, and
-skewed the differences of most pairs with
-\emph{none}.
+10^{-8}$), and the pairwise tests place the difference at random search: every EA outperforms it on
+every metric (Holm-corrected $p \le 0.007$; posterior probability $>99.9\%$).
+Random search never reached a fitness of 1.6 and came on average no closer
+than 1.21\,m to the target (0.94\,m at best).
+By the rule fixed in advance, the final fitness and the AUC got paired
+$t$-tests and the unseen distance Wilcoxon tests, because one no-migration
+controller fell off 3 of its 20 unseen arenas and skewed four of the five
+differences involving no migration.
 
 Between the EAs the differences are small. By the AUC, migrating the best or
-random individuals is probably faster than isolated islands (posterior 99\% and
-98\%; best minus none $-0.086$, 95\% CI $-0.152$ to $-0.020$, $d_z = -0.61$,
-$p = 0.014$), but neither survives the correction for 15 comparisons (Holm $p =
-0.14$ and $0.27$). Migrating the worst is the slowest migration policy: best and random
-are faster with probability 90\% and 94\%, and it is only 76\% faster than
-none. Migrating the best still reached fitness 1.6 first (4{,}076 against
-4{,}501 without migration), with a far smaller lead than in the preliminary study. In the final fitness,
-random migration ended best (1.130; 96\% better than none, 73\% than best), and
-the standard EA sat among the islands (1.171; 36--71\%). No paired test between
-two EAs is significant on any metric (final fitness: all Holm $p \geq 0.81$).
+random individuals is probably faster than no migration
+(Figure~\ref{fig:convergence}b; posterior 99\% and
+98\%; best minus no migration $-0.086$, 95\% CI $[-0.152, -0.020]$, effect
+size $d_z = -0.61$, $p = 0.014$), but neither difference survives the
+correction for 15 comparisons (Holm $p = 0.14$ and $0.27$). Migrating the worst
+is the slowest migration policy: best and random migration are faster with
+probability 90\% and 94\%, and it is faster than no migration with probability
+only 76\%. Best and random migration reached a fitness of 1.6 in 18 of 20 runs,
+against 15 without migration, and sooner (median 3{,}968 and 4{,}184
+evaluations against 4{,}976); the standard EA was quickest (3{,}680). In
+final fitness, random migration ended best (1.130; better than no migration
+with probability 96\%, than migrating the best with 73\%), and the standard EA
+lay among the island EAs (1.171). No paired test between two EAs is
+significant on any metric (final fitness: all Holm $p \geq 0.81$).
 
 \begin{figure}[t]
   \centering
-  \maybegraphic{\columnwidth}{figures/final_spread.pdf}
+  \maybegraphic{0.94\columnwidth}{figures/final_spread.pdf}
   \caption{Every seed's final best fitness (a) and distance left on the 20
   unseen arenas (b), per condition: boxes show the quartiles and the median,
-  dots are the 20 seeds. Random search (about 2.5 and 1.4\,m) is left out for
-  scale.}
+  dots are single seeds. The no-migration
+  outlier in (b) fell off 3 arenas,
+  each counted as 10\,m. Random search (fitness about 2.5, 1.4\,m unseen) is
+  omitted for scale.}
   \label{fig:spread}
 \end{figure}
 
-\subsection{What the fitness rewards}
+\paragraph{Diversity} Migrating the best made the islands alike: at the end,
+its genotypes lay 1.68 from their centroid on average, closer than in the
+single population of the standard EA (1.93) and far closer than without
+migration (7.38, larger on all 20 seeds), whose islands end as far apart as
+random genomes (7.23 in random search). Random migration lay between (4.19),
+and migrating the worst kept the islands as far apart as no migration (7.12).
 
-\begin{figure}[t]
-  \centering
-  \maybegraphic{\columnwidth}{figures/fitness_terms.pdf}
-  \caption{The final champions' fitness split into the weighted terms of
-  Equation~\ref{eq:fitness}, mean over 20 seeds; ``mean distance'' is
-  $0.5\,\bar d$. No champion was ever upside down.}
-  \label{fig:terms}
-\end{figure}
-
-In every EA's champion the speed term $0.5\,\bar d$ is about half of the
-fitness (0.58--0.62) and larger than the final distance (0.35--0.43;
-Figure~\ref{fig:terms}). The gait terms add only 0.18--0.20: no champion is
-ever upside down and the core hardly touches the ground ($c \leq 0.02$ on average). The
-posture terms shaped the gait early and then left the ranking to the distances.
-
-\subsection{End results: which algorithm is best?}
+\subsection{Exploratory: which algorithm ends best?}
 \label{sec:end}
 
 \begin{table}[t]
-  \caption{End results of the five EAs (exploratory). Own target: best brains
-  that reach the target of their training arena in 15\,s and within 30\,s, of
-  20. Unseen: share of the 400 walks on unseen arenas that reach the target
-  within 30\,s (none does within 15\,s), mean fitness there over 15\,s, and walks
-  in which the robot fell off the arena within 30\,s (a fall counts as 10\,m from
-  the target in the distances).}
+  \caption{End results of the five EAs (exploratory). Own target: best
+  controllers (of 20) reaching their training target within 15 and 30\,s.
+  Unseen arenas: share of the 400 walks reaching the target within 30\,s (5 of
+  all 2{,}000 do within 15\,s), mean fitness over 15\,s, and walks that fell
+  off the arena within 30\,s.}
   \label{tab:end}
   \small
   \setlength{\tabcolsep}{4pt}
@@ -566,122 +594,122 @@ posture terms shaped the gait early and then left the ranking to the distances.
   \end{tabular}
 \end{table}
 
-Speed matters only when compute is short, so we also asked which algorithm
-ends best, with reaching the target first (Table~\ref{tab:end}). No end result
-separates the EAs significantly: their arrival rates on the own arena do not
-differ (Cochran's $Q$, $p = 0.41$ at 15\,s and 0.63 at 30\,s), nor do their
-unseen arrivals or unseen fitness (Wilcoxon, all Holm $p \geq 0.36$). Read
-descriptively, the standard EA generalises best: it reaches the most unseen
-targets (12\% of its walks against 6--10\%), has the best unseen fitness and
-fell off an arena once in 400 walks, against 6--17 times for the islands.
-Random migration ends with the best training fitness and is the steadiest: in
-final fitness it was never the worst of the five on any seed, while the
-standard EA is all-or-nothing, the best on 9 seeds and the worst on 7
-(Figure~\ref{fig:spread}a). Migrating the best brings the most brains to their
-own target but reaches the fewest unseen targets and falls off most often. All brains specialise to their arena: they
-end 0.35--0.43\,m from their own target after 15\,s, against 0.83--1.01\,m on
-unseen arenas. And the 15\,s limit binds: 19 of the 120 best brains reach their
-own target within 15\,s, 39 within 20\,s; the others stall, most of them
-0.1--1.0\,m away, and more time hardly helps.
-
-\subsection{Preliminary study: how often to migrate}
-\label{sec:interval}
-
-\begin{figure}[t]
-  \centering
-  \maybegraphic{\columnwidth}{figures/interval.pdf}
-  \caption{Preliminary study: the \emph{best} policy migrating every 5, 10, 20
-  or 50 generations, or never (``off''), on seeds 0--4. (a) Final best fitness and
-  (b) distance left on 20 unseen arenas: dots are seeds, black the mean with
-  its 95\% interval. (c) Share of generations in which all four islands hold
-  the same champion; dots are seeds.}
-  \label{fig:interval}
-\end{figure}
-
-Figure~\ref{fig:interval} shows a sweet spot: every 5, 10 or 20 generations
-is equally fast (AUC probabilities 42--58\% between them) and faster than every
-50 (93--99\%) or never (96--100\%); three migrations in 166 generations are too
-few to matter. The more often the best migrate, the sooner one champion holds
-all islands: in 35\% of generations at every 5, 28\% at 10 and 6\% at 20. Every
-20 kept the islands apart and had the best final fitness (1.093) and unseen
-result (0.76\,m), though only modestly (58\% and 77\% against every 10), so we
-chose it for the islands' diversity. In the final experiment one champion held
-all four islands in 4.3\% of the generations.
+After seeing the results, we asked whether the EAs differ in where the runs
+end, giving priority to reaching the target (Table~\ref{tab:end}); as these
+measures were chosen post hoc, they describe rather than confirm. No end
+result separates the EAs significantly: their
+arrival rates on their own arena do not differ (Cochran's $Q$, $p = 0.41$ at
+15\,s and 0.63 at 30\,s), nor do their unseen arrivals or unseen fitness
+(Wilcoxon, all Holm $p \geq 0.36$). Read descriptively, the standard EA
+generalised best: it reached the most unseen targets (12\% of its walks against
+6--10\%), had the best unseen fitness and fell off an arena once in 400 walks,
+against 6--17 times for the island EAs. Random migration was the steadiest: in
+final fitness it was never the worst of the five on any seed, whereas the
+standard EA was the best on 9 seeds and the worst on 7
+(Figure~\ref{fig:spread}a). Migrating the best brought the most controllers to
+their own target within 30\,s (10 of 20) but reached the fewest unseen targets
+and fell off most often. All controllers specialise to their arena: the best ones end on average 0.35--0.43\,m from
+their own target after 15\,s, against 0.83--1.01\,m on unseen arenas. Finally,
+the 15\,s limit is restrictive: 19 of the 120 best controllers reach their own
+target within 15\,s, 39 within 20\,s and only one more within 60\,s; most
+others stall 0.1--1.0\,m away.
 
 % =====================================================================
 \section{Discussion}
 
 \paragraph{Answer to the RQ} With 20 seeds, the emigrant-selection policy has
 at most a small effect on how fast the islands improve and none we can detect
-on where they end. H1 is partly supported: migrating the best or random
-individuals is probably faster than isolated islands (99\% and 98\%; a medium
-effect for the best, $d_z = -0.61$), but not significantly after correcting
-for 15 comparisons, and migrating the worst barely helps (76\%). H2 fits the
-data, weakly: migrating the best is the fastest by the AUC, though tied with
-random (59\%), and ends at a slightly worse plateau than random migration
-(73\%), as the selection-pressure argument predicts~\cite{cantupaz2001migration}.
-H3 is supported in direction: migrating the worst is the slowest migration
-policy and the closest to no migration. By end results, no algorithm is
-reliably best either (Section~\ref{sec:end}).
+on where they end. H1 is supported only in direction: migrating the best or
+random individuals is probably faster than no migration (a medium effect for
+the best, $d_z = -0.61$), but not significantly after correction. For
+migrating the worst, H3 holds rather than H1: it was the slowest migration
+policy, not clearly faster than no migration (76\%, $d_z = -0.16$), and its
+islands stayed as far apart as isolated ones. H2 is supported in direction:
+migrating the best was the fastest by the AUC, though tied with random
+migration (59\%), and ended slightly behind it (73\%, not significant); as most runs were
+still improving at the end, the plateau that H2 predicts was not reached. Its
+mechanism did appear~\cite{cantupaz2001migration}: the islands rarely shared
+one champion (4.3\% of the generations; never with other policies), but their genotypes converged as
+closely as a single population's (Section~\ref{sec:convergence}).
 
-\paragraph{Why the policies differ so little} In a generational EA with two
-elites per island, an island's worst individuals are not random genomes: they
-are fresh children of tournament-selected parents, carrying the source island's
-working neurons, and every policy replaces the receiver's worst individuals.
-Recombined with the natives' neurons (crossover probability 0.9), any
-emigrant injects some useful material; the best only spread it faster. The
-interval was not the reason: at every 20 generations the islands stayed
-distinct (one shared champion in 4\% of the generations, against 28\% at every
-10), yet whom they sent mattered little. How \emph{often} they migrate is the
-stronger lever: every 50 generations or never was clearly slower than 5--20.
+\paragraph{Unexpected: the policies differ little} Migrating the worst
+behaved like no migration, as H3 predicts: emigrants that lose most
+tournaments apparently pass on few genes, as the islands stayed apart. The
+surprise is that migrating the best changed the population so much and its
+fitness so little: its lead over no migration shrinks from the AUC ($d_z =
+-0.61$) to the final fitness ($-0.29$), so within 166 generations migration
+mainly spreads good solutions sooner, and the lost diversity has not yet cost
+much on the training arena, although this policy reached the fewest unseen
+targets (Section~\ref{sec:end}). Nor did the competing-conventions risk of
+Section~1 show: the best immigrants are recombined with natives most often,
+yet that policy was among the fastest.
 
-\paragraph{Why one population did as well} Our budget is short (166
-generations), and the panmictic population keeps the 8 best individuals
-overall, where the islands keep the 2 best of each island. At this budget a
-single population was as good as the islands on average, but not as
-dependable: in final fitness it was the best of the five EAs on 9 of 20 seeds
-and the worst on 7, while random migration was never the worst. One population either finds a
-good gait or gets stuck on its arena; islands hedge against getting stuck, the
-classic case for island models, and pay with fewer big wins. In the
-preliminary study the standard EA had ended best of all; with 20 seeds that
-lead disappeared, a reminder of how wide five-seed intervals are.
-\todo{longer run, or future work?}
+\paragraph{Why the standard EA did as well} It started slower
+(Figure~\ref{fig:convergence}b; behind no migration over the first 20
+generations on 14 of 20 seeds): until the first migration the island EAs are
+four separate searches, and the best of four beat the single population of
+80, although that population beat a typical island (50 of 80 islands at
+generation 10). Afterwards its best
+individuals breed with all 80 rather than within an island of 20, so good
+solutions spread at once; it caught up by generation 40. It was as good as
+the island EAs on average but less dependable: it either finds a good gait or
+gets stuck on its arena, while islands hedge against getting stuck, the
+classic case for island models. Its lead in the preliminary study (0.957
+against 1.13--1.24) disappeared with 20 seeds, a reminder of how wide
+five-seed intervals are.
 
 \paragraph{Limitations} The policy effects we found are small ($|d_z| \leq
-0.61$) and none survives the correction for 15 comparisons; detecting them
-reliably would need more than 20 seeds.
-The settings were tuned with one factor at a time on three seeds, which misses
-interactions~\cite{eiben2011parameter}, and with the random policy, so they may
-suit the policies unevenly. Choosing the test by a normality check is a
-two-stage procedure; we fixed the rule in advance. The fitness shapes the gait (Section~\ref{sec:fitness}); the plain distance
-gives the same ordering (Table~\ref{tab:results}). Brains specialise to their
-arena, one body and world were used, and training on varied arenas did not
-help in a pilot~\cite{jakobi1997evolutionary}.
+0.61$) and none survives the correction for 15 comparisons: our power to
+detect $d_z = 0.6$ at the corrected level was about 30\%, and 80\% would need
+about 44 seeds. The settings were tuned one factor at
+a time on three seeds, which misses interactions~\cite{eiben2011parameter};
+tuning used the random policy and the interval study the best policy, so the
+settings may suit the policies unevenly and favour these two. Choosing the test by a normality
+check is a two-stage procedure, so its error rates are only approximately
+nominal. The fitness shapes the gait
+(Section~\ref{sec:fitness}), but the gait terms add only 0.18--0.20 to the
+best controllers' fitness, and the plain distance gives the same ordering
+(Table~\ref{tab:results}). The 15\,s walk cuts off slow but working gaits, and
+the runs had not plateaued (after 9{,}000 evaluations, 12--16 of each EA's 20
+runs still improved). Finally, we used one body and one
+world, and the controllers specialise to their arena; training on varied
+arenas~\cite{jakobi1997evolutionary} did not help in a pilot.
 
 % =====================================================================
 \section{Conclusion}
 
-We evolved neural controllers that make \texttt{spider\_8} walk to a target
-2\,m away and asked whom an island model should send between its islands. With
-20 paired seeds, every EA beats random search by far, but the emigrant-selection
-policy matters little: migrating the best or random individuals probably speeds
-up evolution compared with isolated islands, migrating the worst barely does,
-and no difference between the evolutionary algorithms is significant after
-correcting for multiple comparisons, in speed, final fitness or behaviour on
-unseen arenas; by end results a single population generalised best but was
-the least consistent, and random migration ended fittest. How often the
-islands migrate mattered more in a preliminary study: every 5--20 generations
-was equally fast and every 50 as slow as never. Future work: longer budgets,
-where island diversity should pay off; crossover that aligns an immigrant's
-neurons with the natives'~\cite{uriot2020safe}; and arenas varied enough for
-the brains to generalise. These conclusions rest on one body, one world and a
-fitness that shapes the gait.
+We asked whom an island model should send between its islands when
+evolving neural controllers that make \texttt{spider\_8} walk to a target.
+With 20 paired seeds, every EA clearly outperforms random search, but the
+emigrant-selection policy matters little: migrating the best or random
+individuals probably speeds up evolution compared with no migration, and no
+difference between two EAs is significant after correction. Migrating the best
+made the islands as alike as one population, as the literature predicts, at
+little cost within 166 generations; migrating the worst behaved like no
+migration. On our data, random migration is a safe default: about as fast as
+migrating the best, it ended fittest and was never the worst on any seed. These
+conclusions rest on one body, one world, a shaped fitness and effects too
+small to confirm with 20 seeds. Future work: longer budgets, where island
+diversity should pay off; crossover that aligns immigrant and native
+neurons~\cite{uriot2020safe}; and more varied training arenas.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
 
-% The course asks every member to list their own contributions at the end.
+% The course asks every member to list their own contributions at the end of
+% the report, and any use of generative AI to be disclosed.
 \section*{Contributions}
 \todo{each member: one or two lines on what they did}
+
+\section*{Use of generative AI}
+We used Anthropic's Claude, through Claude Code, as an assistant throughout
+the project: to write and review code (the EA, the simulation and fitness, the
+analysis and figure scripts and their tests), to propose design options and
+hypotheses, to run and monitor the experiments, and to draft and edit the text
+of this report. The team chose the
+research question, made the design decisions and reviewed all code and text.
+Every number in this report comes from our own runs and was checked against
+their logs; we take full responsibility for the content.
+
 
 \end{document}

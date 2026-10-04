@@ -1,4 +1,4 @@
-"""The fitness: distance to the target plus the two posture penalties (D15)."""
+"""The fitness and the measurements it is made of (D15, D18, D20)."""
 
 from pathlib import Path
 
@@ -234,7 +234,7 @@ def test_a_walk_measures_motor_work(flat_model: mj.MjModel) -> None:
     assert 0.0 <= score.work_imbalance <= 1.0
 
 
-def test_a_brain_with_position_inputs_walks(flat_model: mj.MjModel) -> None:
+def test_a_brain_with_position_inputs_walks() -> None:
     """Experiment 29's brain: 18 inputs, 228 weights for spider_8 with 8,4."""
     config = SimConfig(
         body="spider_8", vision=False, hidden_layers="8,4", position=True, duration=0.5

@@ -3,8 +3,7 @@
 #
 # Why (D7): most children are worse than their better parent for every
 # operator, mutation included; the question is which operator makes the rare
-# better child most often. Three alternatives, chosen by Emre after a
-# literature check:
+# better child most often. Three alternatives, chosen after a literature check:
 #   h8_4_weight     --crossover weight     each weight from either parent: does
 #                                          keeping neurons whole matter?
 #   h8_4_blx        --crossover blx        BLX-0.5, a blend whose spread shrinks
@@ -43,4 +42,3 @@ for name in "${operators[@]}"; do brains+=("$out/$name"/seed10{0,1,2}); done
 uv run --project ../ariel python unseen.py "${brains[@]}" > "$out/crossover_unseen.log" 2>&1
 uv run --project ../ariel python analyze.py "${operators[@]/#/$out/}" \
     --reference h8_4 --out "$out/analysis_crossover_ops"
-uv run --project ../ariel python compute_ledger.py

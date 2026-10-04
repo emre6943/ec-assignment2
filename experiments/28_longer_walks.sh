@@ -24,4 +24,3 @@ uv run --project ../ariel python longer_walks.py "${conditions[@]}" \
     --out "$out/longer_walks"
 uv run --project ../ariel python longer_walks.py "${interval[@]}" \
     --out "$out/longer_walks_interval"
-uv run --project ../ariel python compute_ledger.py

@@ -1,7 +1,7 @@
 """Give the evolved brains more time: do they reach the target? (decision D12)
 
-    uv run --project ../ariel python longer_walks.py results/olympic/best \\
-        results/olympic/none ... --out results/olympic/longer_walks
+    uv run --project ../ariel python longer_walks.py results/final/best \\
+        results/final/none ... --out results/final/longer_walks
 
 The brains are trained on 15 s walks. This walks each run's best brain on its
 own training arena for every `--durations` length (default 15, 20, 30 and 60
@@ -127,7 +127,7 @@ def summary(
         for name in ("unseen.json", f"unseen_{LONG_TEST:g}s.json"):
             shares = [unseen_reached(run, name) for run in runs]
             known = [s for s in shares if s is not None]
-            unseen.append(f"{100 * np.mean(known):.0f}%" if known else "—")
+            unseen.append(f"{100 * np.mean(known):.1f}%" if known else "—")
         lines.append(f"| {condition} | " + " | ".join(cells + unseen) + " |")
     lines.append(
         "| **all** | "
