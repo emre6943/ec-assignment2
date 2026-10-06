@@ -3,9 +3,10 @@ __data__/
 .venv/
 __pycache__/
 *.png
+# except the png files in the report/figures directory
+!report/figures/*.png
 *.sqlite
 .claude/
 results/
 .DS_Store
-!report/figures/walk_filmstrip.png
 submission/
