@@ -16,7 +16,8 @@ label in `report/main.tex`:
         unseen-arena distance per seed for each migration interval of the
         best policy, and how often every island holds the same champion.
     Figure 3, fig:convergence -> convergence.pdf (full text width)
-        (a) best fitness so far against generations (top axis: evaluations),
+        (a) best fitness so far (solid) and the population's mean fitness
+            (dotted) against generations (top axis: evaluations), each the
             mean ± standard deviation over the seeds of every condition: the
             line plot the spec asks for.
         (b) the research question's paired comparison: each EA's best fitness
@@ -336,6 +337,24 @@ def paired_gaps(
     )
 
 
+def population_mean(run: Path) -> pd.DataFrame:
+    """Evaluations and the whole population's mean fitness in each generation.
+
+    The log's `all` row averages every individual of every island
+    (`ea.stats_row`). Unlike the best so far it can rise again: generational
+    replacement keeps only the elites, so a generation of poor children
+    lowers it.
+    """
+    log = pd.read_csv(run / "log.csv", dtype={"island": str})
+    everyone = log[log["island"] == "all"]
+    return pd.DataFrame(
+        {
+            "evaluations": everyone["evaluations"].to_numpy(),
+            "mean": everyone["mean"].to_numpy(),
+        }
+    )
+
+
 def evaluations_axis(axis: plt.Axes, evaluations: npt.NDArray) -> None:
     """A top axis in evaluations over a bottom axis in generations."""
     first, step = evaluations[0], evaluations[1] - evaluations[0]
@@ -351,7 +370,8 @@ def evaluations_axis(axis: plt.Axes, evaluations: npt.NDArray) -> None:
 
 
 def convergence(final: Path, out: Path) -> None:
-    """(a) Best fitness so far, mean ± std over seeds, for every condition.
+    """(a) Best fitness so far and population mean fitness, mean ± std over
+    seeds, for every condition.
 
     (b) Each EA's best fitness so far minus no migration's on the same seed,
     mean over seeds with its 95% t-interval, on the AUC's evaluation grid:
@@ -366,34 +386,75 @@ def convergence(final: Path, out: Path) -> None:
         folder.name: {run.name: best_so_far(run) for run in runs_of(folder)}
         for folder in folders
     }
+    population = {
+        folder.name: [population_mean(run) for run in runs_of(folder)]
+        for folder in folders
+    }
     figure, (spread_axis, gap_axis) = plt.subplots(1, 2, figsize=(TEXT_WIDTH, 2.35))
 
+    # Two curves per condition, each the mean over the seeds with a ±1 SD
+    # band: the best fitness so far (solid) and the population's mean fitness
+    # (dotted). Random search's population is its 8 kept best plus the
+    # generation's 72 fresh random genotypes (`ea.EA.make_child`).
     means = {}
     for condition in CONDITIONS:
-        values = np.array(
-            [on_grid(c, "fitness", evaluations) for c in curves[condition].values()]
-        )
-        mean, std = values.mean(axis=0), values.std(axis=0, ddof=1)
-        means[condition] = mean
-        spread_axis.fill_between(
-            generations,
-            mean - std,
-            mean + std,
-            color=CONDITION_COLOURS[condition],
-            alpha=BAND_ALPHA["spread"],
-            lw=0,
-        )
+        for kind, values in (
+            (
+                "best",
+                [
+                    on_grid(c, "fitness", evaluations)
+                    for c in curves[condition].values()
+                ],
+            ),
+            (
+                "mean",
+                [on_grid(c, "mean", evaluations) for c in population[condition]],
+            ),
+        ):
+            values = np.array(values)
+            mean, std = values.mean(axis=0), values.std(axis=0, ddof=1)
+            means[condition, kind] = mean
+            spread_axis.fill_between(
+                generations,
+                mean - std,
+                mean + std,
+                color=CONDITION_COLOURS[condition],
+                alpha=BAND_ALPHA["spread"],
+                lw=0,
+            )
     for condition in CONDITIONS:  # every mean on top of every band
         spread_axis.plot(
             generations,
-            means[condition],
+            means[condition, "best"],
             color=CONDITION_COLOURS[condition],
             linewidth=1.1,
-            linestyle=(0, (4, 2)) if condition == "random_search" else "-",
             label=label(condition),
         )
+        spread_axis.plot(
+            generations,
+            means[condition, "mean"],
+            color=CONDITION_COLOURS[condition],
+            linewidth=0.9,
+            linestyle=(0, (1, 1.3)),
+        )
+    print(
+        "convergence (a): final population mean fitness: "
+        + ", ".join(f"{c} {means[c, 'mean'][-1]:.3f}" for c in CONDITIONS)
+    )
     spread_axis.set_ylim(bottom=0)
-    spread_axis.set_ylabel("best fitness so far")
+    spread_axis.set_ylabel("fitness")
+    spread_axis.legend(
+        handles=[
+            mpl.lines.Line2D([], [], color=INK, linewidth=1.1),
+            mpl.lines.Line2D([], [], color=INK, linewidth=0.9, linestyle=(0, (1, 1.3))),
+        ],
+        labels=["best so far", "population mean"],
+        # Between random search's population mean (about 4.1) and the EAs'.
+        loc="upper right",
+        bbox_to_anchor=(1.0, 0.86),
+        frameon=False,
+        handlelength=2.2,
+    )
 
     grid = auc_grid(curves)
     # The AUC grid in generations, for the shared x axis. Its first point, 0

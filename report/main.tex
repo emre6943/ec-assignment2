@@ -486,9 +486,12 @@ and 77\% against every 10), so we chose it to keep the islands diverse.
 \begin{figure*}[t]
   \centering
   \maybegraphic{\textwidth}{figures/convergence.pdf}
-  \caption{(a) Best-so-far fitness against generations (top axis:
-  evaluations), mean over 20 seeds with a band of $\pm 1$ standard deviation;
-  lower is better. (b) Paired by seed: each EA's best-so-far fitness minus that
+  \caption{(a) Best-so-far fitness (solid) and the population's mean fitness
+  (dotted) against generations (top axis: evaluations), each the mean over 20
+  seeds with a band of $\pm 1$ standard deviation; lower is better. The
+  population mean levels off near 2.2--2.6 while the best keeps improving;
+  with best migration it dips at every migration, when the immigrants replace
+  each island's two worst. (b) Paired by seed: each EA's best-so-far fitness minus that
   of no migration on the same seed, mean with 95\% confidence band; below zero
   is ahead of no migration, and a curve's mean over the run is the AUC
   difference. The island EAs equal no migration until the first migration

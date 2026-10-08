@@ -103,9 +103,10 @@ def write_final_run(run: Path, distance: float, reached: float) -> None:
     ea = {**ISLANDS, "max_evaluations": 296}
     (run / "config.json").write_text(json.dumps({"ea": ea, "sim": asdict(SIM)}))
     (run / "log.csv").write_text(
-        "generation,evaluations,island,best,best_final,best_distance\n"
+        "generation,evaluations,island,best,mean,best_final,best_distance\n"
         + "".join(
-            f"{g},{80 + 72 * g},all,{best + 3 - g},{best + 3 - g},{distance + 3 - g}\n"
+            f"{g},{80 + 72 * g},all,{best + 3 - g},{best + 4 - g},{best + 3 - g},"
+            f"{distance + 3 - g}\n"
             for g in range(4)
         )
     )
